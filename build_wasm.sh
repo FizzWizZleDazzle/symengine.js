@@ -419,9 +419,8 @@ build_wasm_module() {
 
     # Mode-specific flags
     if [[ "$BUILD_MODE" == "standalone" ]]; then
-        # Standalone MAIN_MODULE - includes runtime and can load side modules
+        # Standalone module with JS glue code
         link_flags+=(
-            "-sMAIN_MODULE=2"
             "-sMODULARIZE=1"
             "-sEXPORT_NAME=SymEngine"
             "-sENVIRONMENT=web,node,worker"
@@ -441,8 +440,8 @@ build_wasm_module() {
     if [[ "$WITH_EMBIND" == true ]]; then
         emcc_flags+=("-lembind")
 
-        # Create embind wrapper if it doesn't exist
-        create_embind_wrapper
+        # Verify embind bindings exist
+        check_embind_bindings
 
         # Compile the embind wrapper
         log_info "Compiling embind bindings..."
@@ -496,198 +495,12 @@ build_wasm_module() {
     fi
 }
 
-create_embind_wrapper() {
-    local bindings_dir="$SCRIPT_DIR/src"
-    local bindings_file="$bindings_dir/bindings.cpp"
+check_embind_bindings() {
+    local bindings_file="$SCRIPT_DIR/src/bindings.cpp"
 
-    if [[ -f "$bindings_file" ]]; then
-        return 0
+    if [[ ! -f "$bindings_file" ]]; then
+        die "Embind bindings not found at $bindings_file"
     fi
-
-    log_info "Creating embind bindings source..."
-    mkdir -p "$bindings_dir"
-
-    cat > "$bindings_file" << 'EMBIND_EOF'
-/**
- * SymEngine Embind Bindings
- * Exposes SymEngine C++ API to JavaScript
- */
-
-#include <emscripten/bind.h>
-#include <symengine/symengine_config.h>
-#include <symengine/basic.h>
-#include <symengine/add.h>
-#include <symengine/mul.h>
-#include <symengine/pow.h>
-#include <symengine/symbol.h>
-#include <symengine/integer.h>
-#include <symengine/rational.h>
-#include <symengine/real_double.h>
-#include <symengine/constants.h>
-#include <symengine/functions.h>
-#include <symengine/derivative.h>
-#include <symengine/visitor.h>
-#include <symengine/parser.h>
-#include <symengine/printers.h>
-
-using namespace emscripten;
-using namespace SymEngine;
-
-// Wrapper class for easier JavaScript interaction
-class SymEngineExpr {
-public:
-    RCP<const Basic> expr;
-
-    SymEngineExpr() : expr(integer(0)) {}
-    SymEngineExpr(const RCP<const Basic>& e) : expr(e) {}
-    SymEngineExpr(int n) : expr(integer(n)) {}
-    SymEngineExpr(double d) : expr(real_double(d)) {}
-    SymEngineExpr(const std::string& s) : expr(parse(s)) {}
-
-    std::string toString() const {
-        return expr->__str__();
-    }
-
-    std::string toLatex() const {
-        return latex(*expr);
-    }
-
-    SymEngineExpr add(const SymEngineExpr& other) const {
-        return SymEngineExpr(SymEngine::add(expr, other.expr));
-    }
-
-    SymEngineExpr sub(const SymEngineExpr& other) const {
-        return SymEngineExpr(SymEngine::sub(expr, other.expr));
-    }
-
-    SymEngineExpr mul(const SymEngineExpr& other) const {
-        return SymEngineExpr(SymEngine::mul(expr, other.expr));
-    }
-
-    SymEngineExpr div(const SymEngineExpr& other) const {
-        return SymEngineExpr(SymEngine::div(expr, other.expr));
-    }
-
-    SymEngineExpr pow(const SymEngineExpr& exp) const {
-        return SymEngineExpr(SymEngine::pow(expr, exp.expr));
-    }
-
-    SymEngineExpr neg() const {
-        return SymEngineExpr(SymEngine::neg(expr));
-    }
-
-    SymEngineExpr diff(const std::string& var) const {
-        auto sym = symbol(var);
-        return SymEngineExpr(expr->diff(sym));
-    }
-
-    SymEngineExpr expand() const {
-        return SymEngineExpr(SymEngine::expand(expr));
-    }
-
-    SymEngineExpr subs(const std::string& var, const SymEngineExpr& value) const {
-        map_basic_basic m;
-        m[symbol(var)] = value.expr;
-        return SymEngineExpr(expr->subs(m));
-    }
-
-    bool equals(const SymEngineExpr& other) const {
-        return eq(*expr, *other.expr);
-    }
-
-    double evalFloat() const {
-        // Try to evaluate to a double
-        auto result = evalf(*expr, 53, EvalfDomain::Real);
-        if (is_a<RealDouble>(*result)) {
-            return down_cast<const RealDouble&>(*result).i;
-        }
-        return std::nan("");
-    }
-};
-
-// Factory functions
-SymEngineExpr createSymbol(const std::string& name) {
-    return SymEngineExpr(symbol(name));
-}
-
-SymEngineExpr createInteger(int n) {
-    return SymEngineExpr(integer(n));
-}
-
-SymEngineExpr createRational(int num, int den) {
-    return SymEngineExpr(Rational::from_two_ints(integer(num), integer(den)));
-}
-
-SymEngineExpr createFloat(double d) {
-    return SymEngineExpr(real_double(d));
-}
-
-SymEngineExpr parse_expr(const std::string& s) {
-    return SymEngineExpr(parse(s));
-}
-
-// Constants
-SymEngineExpr getPi() { return SymEngineExpr(pi); }
-SymEngineExpr getE() { return SymEngineExpr(E); }
-SymEngineExpr getI() { return SymEngineExpr(I); }
-
-// Functions
-SymEngineExpr symSin(const SymEngineExpr& x) { return SymEngineExpr(sin(x.expr)); }
-SymEngineExpr symCos(const SymEngineExpr& x) { return SymEngineExpr(cos(x.expr)); }
-SymEngineExpr symTan(const SymEngineExpr& x) { return SymEngineExpr(tan(x.expr)); }
-SymEngineExpr symLog(const SymEngineExpr& x) { return SymEngineExpr(log(x.expr)); }
-SymEngineExpr symExp(const SymEngineExpr& x) { return SymEngineExpr(exp(x.expr)); }
-SymEngineExpr symSqrt(const SymEngineExpr& x) { return SymEngineExpr(sqrt(x.expr)); }
-SymEngineExpr symAbs(const SymEngineExpr& x) { return SymEngineExpr(abs(x.expr)); }
-
-std::string getVersion() {
-    return SYMENGINE_VERSION;
-}
-
-EMSCRIPTEN_BINDINGS(symengine) {
-    class_<SymEngineExpr>("Expr")
-        .constructor<>()
-        .constructor<int>()
-        .constructor<double>()
-        .constructor<const std::string&>()
-        .function("toString", &SymEngineExpr::toString)
-        .function("toLatex", &SymEngineExpr::toLatex)
-        .function("add", &SymEngineExpr::add)
-        .function("sub", &SymEngineExpr::sub)
-        .function("mul", &SymEngineExpr::mul)
-        .function("div", &SymEngineExpr::div)
-        .function("pow", &SymEngineExpr::pow)
-        .function("neg", &SymEngineExpr::neg)
-        .function("diff", &SymEngineExpr::diff)
-        .function("expand", &SymEngineExpr::expand)
-        .function("subs", &SymEngineExpr::subs)
-        .function("equals", &SymEngineExpr::equals)
-        .function("evalFloat", &SymEngineExpr::evalFloat);
-
-    function("symbol", &createSymbol);
-    function("integer", &createInteger);
-    function("rational", &createRational);
-    function("float", &createFloat);
-    function("parse", &parse_expr);
-    function("version", &getVersion);
-
-    // Constants
-    function("pi", &getPi);
-    function("e", &getE);
-    function("i", &getI);
-
-    // Functions
-    function("sin", &symSin);
-    function("cos", &symCos);
-    function("tan", &symTan);
-    function("log", &symLog);
-    function("exp", &symExp);
-    function("sqrt", &symSqrt);
-    function("abs", &symAbs);
-}
-EMBIND_EOF
-
-    log_success "Embind bindings created at $bindings_file"
 }
 
 generate_typescript_declarations() {
@@ -699,25 +512,72 @@ generate_typescript_declarations() {
  */
 
 export interface Expr {
+    // String representations
     toString(): string;
     toLatex(): string;
+    toMathML(): string;
+    toCCode(): string;
+    toJSCode(): string;
+
+    // Arithmetic
     add(other: Expr): Expr;
     sub(other: Expr): Expr;
     mul(other: Expr): Expr;
     div(other: Expr): Expr;
     pow(exp: Expr): Expr;
     neg(): Expr;
+
+    // Calculus
     diff(variable: string): Expr;
+    diff2(variable: string, n: number): Expr;
+
+    // Transformation
     expand(): Expr;
+    simplify(): Expr;
     subs(variable: string, value: Expr): Expr;
+    subsExpr(from: Expr, to: Expr): Expr;
+
+    // Comparison
     equals(other: Expr): boolean;
+    notEquals(other: Expr): boolean;
+
+    // Evaluation
     evalFloat(): number;
+    evalComplex(): string;
+
+    // Type checking
+    isNumber(): boolean;
+    isInteger(): boolean;
+    isRational(): boolean;
+    isSymbol(): boolean;
+    isAdd(): boolean;
+    isMul(): boolean;
+    isPow(): boolean;
+    isFunction(): boolean;
+    isZero(): boolean;
+    isOne(): boolean;
+    isNegative(): boolean;
+    isPositive(): boolean;
+    getType(): string;
+    hash(): number;
+
+    // Structure
+    getArgs(): Expr[];
+    getFreeSymbols(): string[];
+    coeff(variable: string, n: number): Expr;
+
+    // Series
+    series(variable: string, order: number): Expr;
+
+    // Rewrite
+    rewriteAsExp(): Expr;
+    rewriteAsSin(): Expr;
+    rewriteAsCos(): Expr;
 }
 
 export interface SymEngineModule {
     Expr: {
         new(): Expr;
-        new(value: number): Expr;
         new(expression: string): Expr;
     };
 
@@ -726,6 +586,7 @@ export interface SymEngineModule {
     integer(n: number): Expr;
     rational(numerator: number, denominator: number): Expr;
     float(value: number): Expr;
+    complex(real: number, imag: number): Expr;
     parse(expression: string): Expr;
     version(): string;
 
@@ -733,15 +594,104 @@ export interface SymEngineModule {
     pi(): Expr;
     e(): Expr;
     i(): Expr;
+    oo(): Expr;
+    inf(): Expr;
+    negInf(): Expr;
+    complexInf(): Expr;
+    nan(): Expr;
+    eulerGamma(): Expr;
+    catalan(): Expr;
+    goldenRatio(): Expr;
+    zero(): Expr;
+    one(): Expr;
 
-    // Functions
+    // Trigonometric
     sin(x: Expr): Expr;
     cos(x: Expr): Expr;
     tan(x: Expr): Expr;
-    log(x: Expr): Expr;
+    cot(x: Expr): Expr;
+    sec(x: Expr): Expr;
+    csc(x: Expr): Expr;
+    asin(x: Expr): Expr;
+    acos(x: Expr): Expr;
+    atan(x: Expr): Expr;
+    acot(x: Expr): Expr;
+    asec(x: Expr): Expr;
+    acsc(x: Expr): Expr;
+    atan2(y: Expr, x: Expr): Expr;
+
+    // Hyperbolic
+    sinh(x: Expr): Expr;
+    cosh(x: Expr): Expr;
+    tanh(x: Expr): Expr;
+    coth(x: Expr): Expr;
+    sech(x: Expr): Expr;
+    csch(x: Expr): Expr;
+    asinh(x: Expr): Expr;
+    acosh(x: Expr): Expr;
+    atanh(x: Expr): Expr;
+    acoth(x: Expr): Expr;
+    asech(x: Expr): Expr;
+    acsch(x: Expr): Expr;
+
+    // Exponential/Logarithmic
     exp(x: Expr): Expr;
+    log(x: Expr): Expr;
+    ln(x: Expr): Expr;
+    logBase(x: Expr, base: Expr): Expr;
+    lambertW(x: Expr): Expr;
+
+    // Power/Root
     sqrt(x: Expr): Expr;
+    cbrt(x: Expr): Expr;
+    root(x: Expr, n: Expr): Expr;
+
+    // Special functions
     abs(x: Expr): Expr;
+    sign(x: Expr): Expr;
+    floor(x: Expr): Expr;
+    ceiling(x: Expr): Expr;
+    ceil(x: Expr): Expr;
+    truncate(x: Expr): Expr;
+    trunc(x: Expr): Expr;
+    gamma(x: Expr): Expr;
+    loggamma(x: Expr): Expr;
+    digamma(x: Expr): Expr;
+    trigamma(x: Expr): Expr;
+    beta(x: Expr, y: Expr): Expr;
+    erf(x: Expr): Expr;
+    erfc(x: Expr): Expr;
+    zeta(x: Expr): Expr;
+    dirichletEta(x: Expr): Expr;
+
+    // Number theory
+    factorial(n: number): Expr;
+    binomial(n: number, k: number): Expr;
+    gcd(a: Expr, b: Expr): Expr;
+    lcm(a: Expr, b: Expr): Expr;
+    mod(a: Expr, b: Expr): Expr;
+    quotient(a: Expr, b: Expr): Expr;
+    isPrime(n: number): boolean;
+    nextPrime(n: number): number;
+    fibonacci(n: number): Expr;
+    lucas(n: number): Expr;
+    bernoulli(n: number): Expr;
+    harmonic(n: number): Expr;
+
+    // Min/Max
+    min(a: Expr, b: Expr): Expr;
+    max(a: Expr, b: Expr): Expr;
+
+    // Piecewise
+    piecewise(expr1: Expr, cond1: Expr, otherwise: Expr): Expr;
+
+    // Comparison (symbolic)
+    Lt(a: Expr, b: Expr): Expr;
+    Le(a: Expr, b: Expr): Expr;
+    Gt(a: Expr, b: Expr): Expr;
+    Ge(a: Expr, b: Expr): Expr;
+    Eq(a: Expr, b: Expr): Expr;
+    Ne(a: Expr, b: Expr): Expr;
 }
 
 declare function SymEngine(options?: {
