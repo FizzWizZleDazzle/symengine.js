@@ -84,7 +84,7 @@ jobs:
           else
             echo "Versions to build: $TO_BUILD"
             echo "has_new=true" >> $GITHUB_OUTPUT
-            JSON_ARRAY=$(echo "$TO_BUILD" | tr ' ' '\n' | jq -R . | jq -s .)
+            JSON_ARRAY=$(echo "$TO_BUILD" | tr ' ' '\n' | jq -R . | jq -sc .)
             echo "versions=$JSON_ARRAY" >> $GITHUB_OUTPUT
           fi
 
