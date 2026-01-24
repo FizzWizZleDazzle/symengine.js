@@ -1,0 +1,290 @@
+name: Build SymEngine WASM
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Every Sunday at midnight UTC
+
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if release exists'
+        required: false
+        default: 'false'
+        type: boolean
+      specific_version:
+        description: 'Build specific version (e.g., 0.12.0)'
+        required: false
+        type: string
+
+  push:
+    branches: [main]
+    paths:
+      - 'build_wasm.sh'
+      - 'src/**'
+      - 'cmake/**'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: "build"
+  cancel-in-progress: false
+
+jobs:
+  check-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      versions_to_build: ${{ steps.check.outputs.versions }}
+      has_new_versions: ${{ steps.check.outputs.has_new }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for new SymEngine versions
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get existing releases in this repo
+          EXISTING=$(gh release list --json tagName -q '.[].tagName' 2>/dev/null | tr '\n' ' ' || echo "")
+          echo "Existing releases: $EXISTING"
+
+          # Get available SymEngine releases
+          AVAILABLE=$(curl -s https://api.github.com/repos/symengine/symengine/releases | \
+            jq -r '.[].tag_name' | sed 's/^v//' | head -10)
+          echo "Available SymEngine versions: $AVAILABLE"
+
+          # Find versions not yet built
+          TO_BUILD=""
+          for version in $AVAILABLE; do
+            TAG="v${version}"
+            if ! echo "$EXISTING" | grep -q "$TAG"; then
+              TO_BUILD="$TO_BUILD $version"
+            fi
+          done
+
+          # Handle specific version request
+          if [ -n "${{ inputs.specific_version }}" ]; then
+            TO_BUILD="${{ inputs.specific_version }}"
+          fi
+
+          # Handle force rebuild - rebuild latest
+          if [ "${{ inputs.force_rebuild }}" = "true" ]; then
+            TO_BUILD=$(echo "$AVAILABLE" | head -1)
+          fi
+
+          TO_BUILD=$(echo "$TO_BUILD" | xargs)
+
+          if [ -z "$TO_BUILD" ]; then
+            echo "No new versions to build"
+            echo "has_new=false" >> $GITHUB_OUTPUT
+            echo "versions=[]" >> $GITHUB_OUTPUT
+          else
+            echo "Versions to build: $TO_BUILD"
+            echo "has_new=true" >> $GITHUB_OUTPUT
+            JSON_ARRAY=$(echo "$TO_BUILD" | tr ' ' '\n' | jq -R . | jq -s .)
+            echo "versions=$JSON_ARRAY" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: check-versions
+    if: needs.check-versions.outputs.has_new_versions == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.check-versions.outputs.versions_to_build) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.51'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Verify Emscripten
+        run: emcc --version
+
+      - name: Cache Boost
+        uses: actions/cache@v4
+        with:
+          path: deps/boost
+          key: boost-1.84.0
+
+      - name: Download dependencies
+        run: |
+          VERSION="${{ matrix.version }}"
+
+          # Download SymEngine
+          mkdir -p symengine
+          echo "Downloading SymEngine v$VERSION"
+          curl -fsSL "https://github.com/symengine/symengine/archive/refs/tags/v${VERSION}.tar.gz" | \
+            tar xz --strip-components=1 -C symengine
+
+          # Download Boost if not cached
+          if [ ! -d "deps/boost" ]; then
+            mkdir -p deps
+            curl -fsSL "https://archives.boost.io/release/1.84.0/source/boost_1_84_0.tar.gz" | \
+              tar xz -C deps
+            mv deps/boost_1_84_0 deps/boost
+          fi
+
+      - name: Build standalone WASM with embind
+        run: ./build_wasm.sh --mode=standalone --with-embind
+
+      - name: Rename standalone artifacts
+        run: |
+          VERSION="${{ matrix.version }}"
+          VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
+
+          mkdir -p release
+
+          mv dist/symengine.js "release/symengine.${VERSION_SAFE}.js"
+          mv dist/symengine.wasm "release/symengine.${VERSION_SAFE}.wasm"
+          mv dist/symengine.d.ts "release/symengine.${VERSION_SAFE}.d.ts"
+
+      - name: Build side module WASM
+        run: ./build_wasm.sh --mode=side --clean
+
+      - name: Rename side module artifact
+        run: |
+          VERSION="${{ matrix.version }}"
+          VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
+
+          mv dist/symengine.wasm "release/symengine.${VERSION_SAFE}.side.wasm"
+
+      - name: Create release metadata
+        run: |
+          VERSION="${{ matrix.version }}"
+          VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
+
+          cat > "release/BUILD_INFO.txt" << EOF
+          SymEngine.js Build Information
+          ==============================
+          SymEngine Version: $VERSION
+          Build Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          Emscripten Version: $(emcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          Integer Class: boostmp (Boost.Multiprecision)
+
+          Files:
+            symengine.${VERSION_SAFE}.js      - JavaScript ES6 module with embind bindings
+            symengine.${VERSION_SAFE}.wasm    - WebAssembly binary for standalone use
+            symengine.${VERSION_SAFE}.d.ts    - TypeScript declarations
+            symengine.${VERSION_SAFE}.side.wasm - Side module for dynamic linking (Rust/C++)
+
+          Usage:
+            import SymEngine from './symengine.${VERSION_SAFE}.js';
+            const se = await SymEngine();
+            const x = se.symbol('x');
+            console.log(se.parse('(x+1)^2').expand().toString());
+          EOF
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ matrix.version }}"
+          VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
+
+          # Check if release already exists
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            if [ "${{ inputs.force_rebuild }}" = "true" ]; then
+              echo "Deleting existing release for rebuild"
+              gh release delete "v${VERSION}" --yes
+            else
+              echo "Release v${VERSION} already exists, skipping"
+              exit 0
+            fi
+          fi
+
+          # Create release
+          gh release create "v${VERSION}" \
+            --title "SymEngine.js v${VERSION}" \
+            --notes "WebAssembly build of SymEngine v${VERSION}
+
+          ## Files
+
+          | File | Description |
+          |------|-------------|
+          | symengine.${VERSION_SAFE}.js | JavaScript ES6 module |
+          | symengine.${VERSION_SAFE}.wasm | WebAssembly binary |
+          | symengine.${VERSION_SAFE}.d.ts | TypeScript declarations |
+          | symengine.${VERSION_SAFE}.side.wasm | Side module for dynamic linking |
+
+          ## Usage
+
+          \`\`\`javascript
+          import SymEngine from './symengine.${VERSION_SAFE}.js';
+
+          const se = await SymEngine();
+          const expr = se.parse('(x + 1)^2');
+          console.log(expr.expand().toString());
+          // Output: 1 + 2*x + x**2
+          \`\`\`
+
+          ## Build Info
+
+          - Integer Class: boostmp (no GMP dependency)
+          - Emscripten: $(emcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          - Build Date: $(date -u +%Y-%m-%d)
+          " \
+            release/*
+
+          echo "Created release v${VERSION}"
+
+  update-latest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update latest symlink release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get the latest version
+          LATEST=$(gh release list --json tagName,isLatest -q 'sort_by(.tagName) | reverse | .[0].tagName')
+          echo "Latest release: $LATEST"
+
+          # Download latest release assets
+          mkdir -p latest
+          gh release download "$LATEST" --dir latest
+
+          # Rename to generic names
+          VERSION=$(echo "$LATEST" | sed 's/^v//')
+          VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
+
+          cp "latest/symengine.${VERSION_SAFE}.js" latest/symengine.latest.js
+          cp "latest/symengine.${VERSION_SAFE}.wasm" latest/symengine.latest.wasm
+          cp "latest/symengine.${VERSION_SAFE}.d.ts" latest/symengine.latest.d.ts
+          cp "latest/symengine.${VERSION_SAFE}.side.wasm" latest/symengine.latest.side.wasm
+
+          # Delete old 'latest' release if exists
+          gh release delete "latest" --yes 2>/dev/null || true
+
+          # Create 'latest' release
+          gh release create "latest" \
+            --title "Latest SymEngine.js (v${VERSION})" \
+            --notes "Always points to the latest stable build.
+
+          Current version: ${VERSION}
+
+          Use versioned releases for production to avoid breaking changes.
+
+          ## Quick Start
+
+          \`\`\`javascript
+          import SymEngine from './symengine.latest.js';
+          const se = await SymEngine();
+          \`\`\`
+          " \
+            --prerelease \
+            latest/symengine.latest.*
+
+          echo "Updated latest release to point to $LATEST"

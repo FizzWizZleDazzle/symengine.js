@@ -1,0 +1,30 @@
+# Build outputs
+/build/
+/dist/
+
+# Dependencies (downloaded during build)
+/deps/
+/symengine/
+
+# Node modules (if using npm for testing)
+/node_modules/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Emscripten cache (if local)
+.emscripten_cache/
+
+# mdbook output
+/docs/book/
+
+# Logs
+*.log

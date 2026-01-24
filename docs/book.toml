@@ -1,0 +1,19 @@
+[book]
+title = "SymEngine.js Documentation"
+authors = ["FizzWizZleDazzle"]
+language = "en"
+multilingual = false
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/FizzWizZleDazzle/symengine.js"
+edit-url-template = "https://github.com/FizzWizZleDazzle/symengine.js/edit/main/docs/{path}"
+
+[output.html.fold]
+enable = true
+level = 1
