@@ -51,9 +51,9 @@ jobs:
           EXISTING=$(gh release list --json tagName -q '.[].tagName' 2>/dev/null | tr '\n' ' ' || echo "")
           echo "Existing releases: $EXISTING"
 
-          # Get available SymEngine releases
+          # Get available SymEngine releases (exclude versions < 0.9.0)
           AVAILABLE=$(curl -s https://api.github.com/repos/symengine/symengine/releases | \
-            jq -r '.[].tag_name' | sed 's/^v//' | head -10)
+            jq -r '.[].tag_name' | sed 's/^v//' | grep -v -E '^0\.[0-8]\.' | head -10)
           echo "Available SymEngine versions: $AVAILABLE"
 
           # Find versions not yet built
@@ -134,10 +134,10 @@ jobs:
             mv deps/boost_1_84_0 deps/boost
           fi
 
-      - name: Build standalone WASM with embind
-        run: ./build_wasm.sh --mode=standalone --with-embind
+      - name: Build WASM with embind
+        run: ./build_wasm.sh --mode=standalone --with-embind --single-file
 
-      - name: Rename standalone artifacts
+      - name: Prepare release artifacts
         run: |
           VERSION="${{ matrix.version }}"
           VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
@@ -145,44 +145,7 @@ jobs:
           mkdir -p release
 
           mv dist/symengine.js "release/symengine.${VERSION_SAFE}.js"
-          mv dist/symengine.wasm "release/symengine.${VERSION_SAFE}.wasm"
           mv dist/symengine.d.ts "release/symengine.${VERSION_SAFE}.d.ts"
-
-      - name: Build side module WASM
-        run: ./build_wasm.sh --mode=side --clean
-
-      - name: Rename side module artifact
-        run: |
-          VERSION="${{ matrix.version }}"
-          VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
-
-          mv dist/symengine.wasm "release/symengine.${VERSION_SAFE}.side.wasm"
-
-      - name: Create release metadata
-        run: |
-          VERSION="${{ matrix.version }}"
-          VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
-
-          cat > "release/BUILD_INFO.txt" << EOF
-          SymEngine.js Build Information
-          ==============================
-          SymEngine Version: $VERSION
-          Build Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-          Emscripten Version: $(emcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-          Integer Class: boostmp (Boost.Multiprecision)
-
-          Files:
-            symengine.${VERSION_SAFE}.js      - JavaScript ES6 module with embind bindings
-            symengine.${VERSION_SAFE}.wasm    - WebAssembly binary for standalone use
-            symengine.${VERSION_SAFE}.d.ts    - TypeScript declarations
-            symengine.${VERSION_SAFE}.side.wasm - Side module for dynamic linking (Rust/C++)
-
-          Usage:
-            import SymEngine from './symengine.${VERSION_SAFE}.js';
-            const se = await SymEngine();
-            const x = se.symbol('x');
-            console.log(se.parse('(x+1)^2').expand().toString());
-          EOF
 
       - name: Create GitHub Release
         env:
@@ -211,10 +174,8 @@ jobs:
 
           | File | Description |
           |------|-------------|
-          | symengine.${VERSION_SAFE}.js | JavaScript ES6 module |
-          | symengine.${VERSION_SAFE}.wasm | WebAssembly binary |
+          | symengine.${VERSION_SAFE}.js | JavaScript ES6 module (WASM bundled) |
           | symengine.${VERSION_SAFE}.d.ts | TypeScript declarations |
-          | symengine.${VERSION_SAFE}.side.wasm | Side module for dynamic linking |
 
           ## Usage
 
@@ -261,9 +222,7 @@ jobs:
           VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
 
           cp "latest/symengine.${VERSION_SAFE}.js" latest/symengine.latest.js
-          cp "latest/symengine.${VERSION_SAFE}.wasm" latest/symengine.latest.wasm
           cp "latest/symengine.${VERSION_SAFE}.d.ts" latest/symengine.latest.d.ts
-          cp "latest/symengine.${VERSION_SAFE}.side.wasm" latest/symengine.latest.side.wasm
 
           # Delete old 'latest' release if exists
           gh release delete "latest" --yes 2>/dev/null || true

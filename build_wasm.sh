@@ -17,6 +17,7 @@
 #   --install-deps              Download and build dependencies
 #   --skip-symengine            Only build dependencies, skip SymEngine
 #   --with-embind               Include embind JavaScript bindings
+#   --single-file               Bundle WASM into JS file (no separate .wasm)
 #   --help                      Show this help message
 #
 # Environment variables:
@@ -41,7 +42,7 @@ INSTALL_PREFIX="${INSTALL_PREFIX:-$SCRIPT_DIR/dist}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 # Build options (defaults)
-BUILD_MODE="standalone"   # standalone (MAIN_MODULE) or side (SIDE_MODULE)
+BUILD_MODE="standalone"   # standalone or side (SIDE_MODULE)
 INTEGER_CLASS="boostmp"   # gmp or boostmp
 BUILD_TYPE="Release"
 ENABLE_THREADS=false
@@ -49,6 +50,7 @@ CLEAN_BUILD=false
 INSTALL_DEPS=false
 SKIP_SYMENGINE=false
 WITH_EMBIND=false
+SINGLE_FILE=false         # Bundle WASM into JS file
 
 # Versions
 GMP_VERSION="6.3.0"
@@ -130,6 +132,9 @@ parse_args() {
                 ;;
             --with-embind)
                 WITH_EMBIND=true
+                ;;
+            --single-file)
+                SINGLE_FILE=true
                 ;;
             --help|-h)
                 show_help
@@ -425,6 +430,10 @@ build_wasm_module() {
             "-sEXPORT_NAME=SymEngine"
             "-sENVIRONMENT=web,node,worker"
         )
+        # Bundle WASM into JS if requested
+        if [[ "$SINGLE_FILE" == true ]]; then
+            link_flags+=("-sSINGLE_FILE=1")
+        fi
         local output_file="$output_dir/symengine.js"
     else
         # SIDE_MODULE for dynamic linking with other projects
@@ -486,6 +495,7 @@ build_wasm_module() {
     echo "  Build Type: $BUILD_TYPE"
     echo "  Threads: $ENABLE_THREADS"
     echo "  Embind: $WITH_EMBIND"
+    echo "  Single File: $SINGLE_FILE"
     echo "  Output: $output_file"
 
     if [[ -f "$output_dir/symengine.wasm" ]]; then
