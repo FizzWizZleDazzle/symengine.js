@@ -4,11 +4,11 @@ WebAssembly build of [SymEngine](https://github.com/symengine/symengine) - a fas
 
 ## Installation
 
-### From CDN (Browser)
+### Direct Import (Browser)
 
 ```html
 <script type="module">
-import SymEngine from 'https://cdn.jsdelivr.net/gh/FizzWizZleDazzle/symengine.js@latest/dist/symengine.js';
+import SymEngine from 'https://github.com/FizzWizZleDazzle/symengine.js/releases/download/v0.14.0/symengine.0-14-0.js';
 
 const se = await SymEngine();
 const expr = se.parse('(x + 1)^2');
@@ -16,24 +16,20 @@ console.log(expr.expand().toString()); // 1 + 2*x + x**2
 </script>
 ```
 
-Or use unpkg:
-```javascript
-import SymEngine from 'https://unpkg.com/@aspect/symengine.js/dist/symengine.js';
-```
+### Download
 
-### From GitHub Releases
-
-Download pre-built binaries from [GitHub Releases](https://github.com/FizzWizZleDazzle/symengine.js/releases).
+Pre-built binaries available from [GitHub Releases](https://github.com/FizzWizZleDazzle/symengine.js/releases).
 
 Each release includes:
 - `symengine.<version>.js` - Boost MP variant (no native dependencies)
-- `symengine.<version>.gmp.js` - GMP variant (faster for large integers)
 - `symengine.<version>.d.ts` - TypeScript declarations
+
+To use the GMP variant (faster for large integers), build from source with `--integer=gmp`.
 
 ## Usage
 
 ```javascript
-import SymEngine from './symengine.0-12-0.js';
+import SymEngine from './symengine.0-14-0.js';
 
 const se = await SymEngine();
 
@@ -165,13 +161,13 @@ Requires [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.
 - No external dependencies
 - Uses permissive licenses (MIT, BSD, Boost)
 - Good general performance
-- ~1.3 MB
+- ~1.6 MB
 
-### GMP
+### GMP (build from source)
 - Uses GNU Multiple Precision library
 - Faster for operations with very large integers
 - LGPL licensed
-- ~1.4 MB
+- Build with `--integer=gmp`
 
 ## Documentation
 
