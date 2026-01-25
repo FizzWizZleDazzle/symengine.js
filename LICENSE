@@ -27,3 +27,6 @@ BSD 3-Clause License - https://github.com/symengine/symengine/blob/master/LICENS
 
 This project uses Boost.Multiprecision, which is licensed under:
 Boost Software License 1.0 - https://www.boost.org/LICENSE_1_0.txt
+
+The GMP variant of this project includes GNU MP (GMP), which is licensed under:
+GNU Lesser General Public License v3.0 - https://www.gnu.org/licenses/lgpl-3.0.html
