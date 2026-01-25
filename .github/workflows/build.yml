@@ -196,6 +196,13 @@ jobs:
 
           ls -lh release/
 
+      - name: Run tests
+        run: |
+          # Test the boostmp build
+          cp release/symengine.*.js dist/symengine.js 2>/dev/null || cp release/symengine.*.gmp.js dist/symengine.js
+          cp release/symengine.*.d.ts dist/symengine.d.ts 2>/dev/null || true
+          node examples/test.mjs
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

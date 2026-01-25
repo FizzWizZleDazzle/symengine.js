@@ -4,34 +4,22 @@
  * Run with: node examples/test.mjs
  */
 
-import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { readFileSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distDir = join(__dirname, '..', 'dist');
 
 // Dynamic import of the WASM module
 async function loadSymEngine() {
-    // Check if the module exists
     try {
-        const wasmPath = join(distDir, 'symengine.wasm');
         const jsPath = join(distDir, 'symengine.js');
-
-        // For Node.js, we need to handle the ES6 module
         const SymEngineFactory = (await import(jsPath)).default;
-
-        // Initialize the module
-        const SymEngine = await SymEngineFactory({
-            locateFile: (path) => join(distDir, path)
-        });
-
-        return SymEngine;
+        return await SymEngineFactory();
     } catch (err) {
         console.error('Failed to load SymEngine:', err.message);
         console.error('Make sure you have built the WASM module first:');
-        console.error('  ./build_wasm.sh --mode=standalone --with-embind');
+        console.error('  ./build_wasm.sh --mode=standalone --with-embind --single-file');
         process.exit(1);
     }
 }
@@ -63,9 +51,14 @@ async function runTests() {
         }
     }
 
-    console.log('Running tests...\n');
+    function assertIncludes(actual, expected, msg) {
+        if (!actual.includes(expected)) {
+            throw new Error(`${msg || 'Assertion failed'}: expected "${actual}" to include "${expected}"`);
+        }
+    }
 
-    // Basic arithmetic
+    console.log('=== Basic Operations ===\n');
+
     test('Create symbol', () => {
         const x = se.symbol('x');
         assertEquals(x.toString(), 'x');
@@ -113,11 +106,27 @@ async function runTests() {
         assertEquals(expanded.toString(), '1 + 2*x + x**2');
     });
 
+    console.log('\n=== Calculus ===\n');
+
     test('Differentiation', () => {
         const expr = se.parse('x^3 + 2*x^2 + x');
         const deriv = expr.diff('x');
         assertEquals(deriv.toString(), '1 + 4*x + 3*x**2');
     });
+
+    test('Second derivative', () => {
+        const expr = se.parse('x^4');
+        const deriv2 = expr.diff2('x', 2);
+        assertEquals(deriv2.toString(), '12*x**2');
+    });
+
+    test('Partial derivative', () => {
+        const expr = se.parse('x^2*y + y^3');
+        const dx = expr.diff('x');
+        assertEquals(dx.toString(), '2*x*y');
+    });
+
+    console.log('\n=== Substitution & Evaluation ===\n');
 
     test('Substitution', () => {
         const expr = se.parse('x^2 + y');
@@ -131,30 +140,133 @@ async function runTests() {
         assertEquals(result, 0.5);
     });
 
-    test('Trigonometric functions', () => {
-        const x = se.symbol('x');
-        const sinx = se.sin(x);
-        assertEquals(sinx.toString(), 'sin(x)');
-    });
-
-    test('Constants (pi)', () => {
+    test('Evaluate pi', () => {
         const pi = se.pi();
-        assertEquals(pi.toString(), 'pi');
+        const val = pi.evalFloat();
+        if (Math.abs(val - Math.PI) > 1e-10) {
+            throw new Error(`Expected PI, got ${val}`);
+        }
     });
 
-    test('Logarithm', () => {
+    console.log('\n=== Trigonometric Functions ===\n');
+
+    test('sin(x)', () => {
         const x = se.symbol('x');
-        const logx = se.log(x);
-        assertEquals(logx.toString(), 'log(x)');
+        assertEquals(se.sin(x).toString(), 'sin(x)');
     });
+
+    test('cos(x)', () => {
+        const x = se.symbol('x');
+        assertEquals(se.cos(x).toString(), 'cos(x)');
+    });
+
+    test('tan(x)', () => {
+        const x = se.symbol('x');
+        assertEquals(se.tan(x).toString(), 'tan(x)');
+    });
+
+    test('sin(0) = 0', () => {
+        const zero = se.integer(0);
+        assertEquals(se.sin(zero).toString(), '0');
+    });
+
+    test('cos(0) = 1', () => {
+        const zero = se.integer(0);
+        assertEquals(se.cos(zero).toString(), '1');
+    });
+
+    console.log('\n=== Special Functions ===\n');
+
+    test('exp(x)', () => {
+        const x = se.symbol('x');
+        assertEquals(se.exp(x).toString(), 'exp(x)');
+    });
+
+    test('log(x)', () => {
+        const x = se.symbol('x');
+        assertEquals(se.log(x).toString(), 'log(x)');
+    });
+
+    test('sqrt(x)', () => {
+        const x = se.symbol('x');
+        assertIncludes(se.sqrt(x).toString(), 'x');
+    });
+
+    test('gamma function', () => {
+        const x = se.symbol('x');
+        assertEquals(se.gamma(x).toString(), 'gamma(x)');
+    });
+
+    console.log('\n=== Number Theory ===\n');
+
+    test('factorial(5) = 120', () => {
+        const f = se.factorial(5);
+        assertEquals(f.toString(), '120');
+    });
+
+    test('fibonacci(10) = 55', () => {
+        const f = se.fibonacci(10);
+        assertEquals(f.toString(), '55');
+    });
+
+    test('binomial(10, 3) = 120', () => {
+        const b = se.binomial(10, 3);
+        assertEquals(b.toString(), '120');
+    });
+
+    test('gcd(12, 8) = 4', () => {
+        const a = se.integer(12);
+        const b = se.integer(8);
+        assertEquals(se.gcd(a, b).toString(), '4');
+    });
+
+    test('isPrime(17) = true', () => {
+        assertEquals(se.isPrime(17), true);
+    });
+
+    test('isPrime(18) = false', () => {
+        assertEquals(se.isPrime(18), false);
+    });
+
+    console.log('\n=== Constants ===\n');
+
+    test('pi', () => {
+        assertEquals(se.pi().toString(), 'pi');
+    });
+
+    test('e (Euler)', () => {
+        assertEquals(se.e().toString(), 'E');
+    });
+
+    test('i (imaginary)', () => {
+        assertEquals(se.i().toString(), 'I');
+    });
+
+    test('Euler-Mascheroni gamma', () => {
+        assertEquals(se.eulerGamma().toString(), 'EulerGamma');
+    });
+
+    console.log('\n=== Output Formats ===\n');
 
     test('LaTeX output', () => {
         const expr = se.parse('x^2/2');
         const latex = expr.toLatex();
-        // LaTeX output varies, just check it's non-empty
         if (!latex || latex.length === 0) {
             throw new Error('Empty LaTeX output');
         }
+    });
+
+    test('C code output', () => {
+        const expr = se.parse('sin(x) + cos(y)');
+        const code = expr.toCCode();
+        assertIncludes(code, 'sin');
+        assertIncludes(code, 'cos');
+    });
+
+    test('JavaScript code output', () => {
+        const expr = se.parse('x^2 + 1');
+        const code = expr.toJSCode();
+        assertIncludes(code, 'Math.pow');
     });
 
     // Summary
