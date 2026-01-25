@@ -248,22 +248,23 @@ build_gmp() {
     local gmp_src="$DEPS_DIR/gmp-${GMP_VERSION}"
     if [[ ! -d "$gmp_src" ]]; then
         log_info "Downloading GMP..."
-        curl -fsSL "https://gmplib.org/download/gmp/gmp-${GMP_VERSION}.tar.xz" | \
-            tar xJ -C "$DEPS_DIR"
+        local gmp_url="https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+        curl -fsSL "$gmp_url" -o "$DEPS_DIR/gmp.tar.xz"
+        tar xJf "$DEPS_DIR/gmp.tar.xz" -C "$DEPS_DIR"
+        rm "$DEPS_DIR/gmp.tar.xz"
     fi
 
     cd "$gmp_build_dir"
 
     # Configure GMP for Emscripten
     # --disable-assembly is CRITICAL for WebAssembly
+    # Use wasm32 as host to properly configure for WebAssembly
     emconfigure "$gmp_src/configure" \
         --prefix="$gmp_install_dir" \
-        --host=none \
-        --build=none \
+        --host=wasm32-unknown-emscripten \
         --disable-assembly \
         --enable-static \
         --disable-shared \
-        --enable-cxx \
         CFLAGS="-O2" \
         CXXFLAGS="-O2"
 
@@ -736,7 +737,18 @@ main() {
     setup_emscripten
 
     # Install dependencies if requested or needed
-    if [[ "$INSTALL_DEPS" == true ]] || [[ ! -d "$SYMENGINE_SRC" ]]; then
+    local need_deps=false
+    if [[ "$INSTALL_DEPS" == true ]]; then
+        need_deps=true
+    elif [[ ! -d "$SYMENGINE_SRC" ]]; then
+        need_deps=true
+    elif [[ "$INTEGER_CLASS" == "gmp" ]] && [[ ! -f "$DEPS_DIR/gmp-wasm/lib/libgmp.a" ]]; then
+        need_deps=true
+    elif [[ "$INTEGER_CLASS" == "boostmp" ]] && [[ ! -d "$DEPS_DIR/boost" ]]; then
+        need_deps=true
+    fi
+
+    if [[ "$need_deps" == true ]]; then
         install_dependencies
     fi
 

@@ -15,6 +15,15 @@ on:
         description: 'Build specific version (e.g., 0.12.0)'
         required: false
         type: string
+      integer_class:
+        description: 'Integer class to build'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - boostmp
+          - gmp
 
   push:
     branches: [main]
@@ -116,6 +125,14 @@ jobs:
           path: deps/boost
           key: boost-1.84.0
 
+      - name: Cache GMP
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps/gmp-6.3.0
+            deps/gmp-wasm
+          key: gmp-wasm-6.3.0-emcc3.1.51
+
       - name: Download dependencies
         run: |
           VERSION="${{ matrix.version }}"
@@ -134,18 +151,50 @@ jobs:
             mv deps/boost_1_84_0 deps/boost
           fi
 
-      - name: Build WASM with embind
-        run: ./build_wasm.sh --mode=standalone --with-embind --single-file
+          # Download GMP source if not cached (will be built by build_wasm.sh)
+          if [ ! -d "deps/gmp-6.3.0" ]; then
+            mkdir -p deps
+            curl -fsSL "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz" -o deps/gmp.tar.xz
+            tar xJf deps/gmp.tar.xz -C deps
+            rm deps/gmp.tar.xz
+          fi
 
-      - name: Prepare release artifacts
+      - name: Determine integer classes to build
+        id: int_class
+        run: |
+          INPUT="${{ inputs.integer_class }}"
+          if [ -z "$INPUT" ] || [ "$INPUT" = "both" ]; then
+            echo "classes=boostmp gmp" >> $GITHUB_OUTPUT
+          else
+            echo "classes=$INPUT" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build WASM modules
         run: |
           VERSION="${{ matrix.version }}"
           VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
-
           mkdir -p release
 
-          mv dist/symengine.js "release/symengine.${VERSION_SAFE}.js"
-          mv dist/symengine.d.ts "release/symengine.${VERSION_SAFE}.d.ts"
+          for INT_CLASS in ${{ steps.int_class.outputs.classes }}; do
+            echo "Building with integer class: $INT_CLASS"
+
+            # Clean previous build
+            rm -rf build/symengine-standalone dist
+
+            # Build
+            ./build_wasm.sh --mode=standalone --integer=$INT_CLASS --with-embind --single-file
+
+            # Name output based on integer class
+            if [ "$INT_CLASS" = "boostmp" ]; then
+              mv dist/symengine.js "release/symengine.${VERSION_SAFE}.js"
+              mv dist/symengine.d.ts "release/symengine.${VERSION_SAFE}.d.ts"
+            else
+              mv dist/symengine.js "release/symengine.${VERSION_SAFE}.gmp.js"
+              cp dist/symengine.d.ts "release/symengine.${VERSION_SAFE}.gmp.d.ts"
+            fi
+          done
+
+          ls -lh release/
 
       - name: Create GitHub Release
         env:
@@ -165,6 +214,22 @@ jobs:
             fi
           fi
 
+          # Determine which files we have
+          FILES_TABLE="| File | Description |
+          |------|-------------|"
+
+          if [ -f "release/symengine.${VERSION_SAFE}.js" ]; then
+            FILES_TABLE="$FILES_TABLE
+          | symengine.${VERSION_SAFE}.js | JavaScript ES6 module - Boost MP (no native deps) |
+          | symengine.${VERSION_SAFE}.d.ts | TypeScript declarations |"
+          fi
+
+          if [ -f "release/symengine.${VERSION_SAFE}.gmp.js" ]; then
+            FILES_TABLE="$FILES_TABLE
+          | symengine.${VERSION_SAFE}.gmp.js | JavaScript ES6 module - GMP (faster for large integers) |
+          | symengine.${VERSION_SAFE}.gmp.d.ts | TypeScript declarations |"
+          fi
+
           # Create release
           gh release create "v${VERSION}" \
             --title "SymEngine.js v${VERSION}" \
@@ -172,15 +237,21 @@ jobs:
 
           ## Files
 
-          | File | Description |
-          |------|-------------|
-          | symengine.${VERSION_SAFE}.js | JavaScript ES6 module (WASM bundled) |
-          | symengine.${VERSION_SAFE}.d.ts | TypeScript declarations |
+          $FILES_TABLE
+
+          ## Variants
+
+          - **boostmp** (default): Uses Boost Multiprecision. No native dependencies, good general performance.
+          - **gmp**: Uses GNU Multiple Precision library. Faster for operations with very large integers.
 
           ## Usage
 
           \`\`\`javascript
+          // Boostmp version (recommended for most use cases)
           import SymEngine from './symengine.${VERSION_SAFE}.js';
+
+          // Or GMP version (for heavy number theory work)
+          // import SymEngine from './symengine.${VERSION_SAFE}.gmp.js';
 
           const se = await SymEngine();
           const expr = se.parse('(x + 1)^2');
@@ -190,7 +261,6 @@ jobs:
 
           ## Build Info
 
-          - Integer Class: boostmp (no GMP dependency)
           - Emscripten: $(emcc --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
           - Build Date: $(date -u +%Y-%m-%d)
           " \
@@ -221,8 +291,17 @@ jobs:
           VERSION=$(echo "$LATEST" | sed 's/^v//')
           VERSION_SAFE=$(echo "$VERSION" | tr '.' '-')
 
-          cp "latest/symengine.${VERSION_SAFE}.js" latest/symengine.latest.js
-          cp "latest/symengine.${VERSION_SAFE}.d.ts" latest/symengine.latest.d.ts
+          # Copy boostmp as default
+          if [ -f "latest/symengine.${VERSION_SAFE}.js" ]; then
+            cp "latest/symengine.${VERSION_SAFE}.js" latest/symengine.latest.js
+            cp "latest/symengine.${VERSION_SAFE}.d.ts" latest/symengine.latest.d.ts
+          fi
+
+          # Copy GMP version
+          if [ -f "latest/symengine.${VERSION_SAFE}.gmp.js" ]; then
+            cp "latest/symengine.${VERSION_SAFE}.gmp.js" latest/symengine.latest.gmp.js
+            cp "latest/symengine.${VERSION_SAFE}.gmp.d.ts" latest/symengine.latest.gmp.d.ts
+          fi
 
           # Delete old 'latest' release if exists
           gh release delete "latest" --yes 2>/dev/null || true
@@ -239,7 +318,12 @@ jobs:
           ## Quick Start
 
           \`\`\`javascript
+          // Default (boostmp)
           import SymEngine from './symengine.latest.js';
+
+          // Or GMP version
+          // import SymEngine from './symengine.latest.gmp.js';
+
           const se = await SymEngine();
           \`\`\`
           " \
