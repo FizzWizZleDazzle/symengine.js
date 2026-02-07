@@ -23,6 +23,10 @@ Thumbs.db
 # Emscripten cache (if local)
 .emscripten_cache/
 
+# Rust build artifacts
+examples/rust-trunk/target/
+examples/rust-trunk/dist/
+
 # mdbook output
 /docs/book/
 

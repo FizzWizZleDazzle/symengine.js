@@ -1,4 +1,8 @@
 //! Safe Rust wrapper around SymEngine's C API.
+//!
+//! This module exposes the full SymEngine C API as safe Rust types.
+//! Not all methods are used by the demo — the wrapper is intentionally
+//! comprehensive so downstream projects can use any operation.
 
 use crate::symengine_ffi::*;
 use std::ffi::{CStr, CString};
@@ -45,6 +49,19 @@ macro_rules! const_fn {
                 let ptr = basic_new_heap();
                 $ffi(ptr);
                 Self { ptr }
+            }
+        }
+    };
+}
+
+macro_rules! str_fn {
+    ($name:ident, $ffi:ident) => {
+        pub fn $name(&self) -> String {
+            unsafe {
+                let s = $ffi(self.ptr);
+                let result = CStr::from_ptr(s).to_string_lossy().into_owned();
+                basic_str_free(s);
+                result
             }
         }
     };
@@ -310,18 +327,7 @@ impl Expr {
         unsafe {
             let set = setbasic_new();
             basic_free_symbols(self.ptr, set);
-            let n = setbasic_size(set);
-            let mut result = Vec::with_capacity(n);
-            let tmp = basic_new_heap();
-            for i in 0..n {
-                setbasic_get(set, i as c_int, tmp);
-                let s = basic_str(tmp);
-                result.push(CStr::from_ptr(s).to_string_lossy().into_owned());
-                basic_str_free(s);
-            }
-            basic_free_heap(tmp);
-            setbasic_free(set);
-            result
+            collect_set_strings(set)
         }
     }
 
@@ -335,84 +341,40 @@ impl Expr {
         unsafe {
             let set = setbasic_new();
             basic_solve_poly(set, self.ptr, sym.ptr);
-            let n = setbasic_size(set);
-            let mut result = Vec::with_capacity(n);
-            let tmp = basic_new_heap();
-            for i in 0..n {
-                setbasic_get(set, i as c_int, tmp);
-                let s = basic_str(tmp);
-                result.push(CStr::from_ptr(s).to_string_lossy().into_owned());
-                basic_str_free(s);
-            }
-            basic_free_heap(tmp);
-            setbasic_free(set);
-            result
+            collect_set_strings(set)
         }
     }
 
     // =====================================================================
     // String representations
     // =====================================================================
-
-    pub fn to_string(&self) -> String {
-        unsafe {
-            let s = basic_str(self.ptr);
-            let result = CStr::from_ptr(s).to_string_lossy().into_owned();
-            basic_str_free(s);
-            result
-        }
-    }
-
-    pub fn to_latex(&self) -> String {
-        unsafe {
-            let s = basic_str_latex(self.ptr);
-            let result = CStr::from_ptr(s).to_string_lossy().into_owned();
-            basic_str_free(s);
-            result
-        }
-    }
-
-    pub fn to_mathml(&self) -> String {
-        unsafe {
-            let s = basic_str_mathml(self.ptr);
-            let result = CStr::from_ptr(s).to_string_lossy().into_owned();
-            basic_str_free(s);
-            result
-        }
-    }
-
-    pub fn to_ccode(&self) -> String {
-        unsafe {
-            let s = basic_str_ccode(self.ptr);
-            let result = CStr::from_ptr(s).to_string_lossy().into_owned();
-            basic_str_free(s);
-            result
-        }
-    }
-
-    pub fn to_jscode(&self) -> String {
-        unsafe {
-            // basic_str_jscode takes *mut because of C API quirk
-            let s = basic_str_jscode(self.ptr);
-            let result = CStr::from_ptr(s).to_string_lossy().into_owned();
-            basic_str_free(s);
-            result
-        }
-    }
-
-    pub fn to_julia(&self) -> String {
-        unsafe {
-            let s = basic_str_julia(self.ptr);
-            let result = CStr::from_ptr(s).to_string_lossy().into_owned();
-            basic_str_free(s);
-            result
-        }
-    }
+    str_fn!(to_string, basic_str);
+    str_fn!(to_latex, basic_str_latex);
+    str_fn!(to_mathml, basic_str_mathml);
+    str_fn!(to_ccode, basic_str_ccode);
+    str_fn!(to_jscode, basic_str_jscode);
+    str_fn!(to_julia, basic_str_julia);
 
     /// Internal: get raw pointer (for matrix operations).
     pub(crate) fn as_ptr(&self) -> *mut BasicStruct {
         self.ptr
     }
+}
+
+/// Drain a CSetBasic into a Vec<String>, freeing the set.
+unsafe fn collect_set_strings(set: *mut CSetBasic) -> Vec<String> {
+    let n = setbasic_size(set);
+    let mut result = Vec::with_capacity(n);
+    let tmp = basic_new_heap();
+    for i in 0..n {
+        setbasic_get(set, i as c_int, tmp);
+        let s = basic_str(tmp);
+        result.push(CStr::from_ptr(s).to_string_lossy().into_owned());
+        basic_str_free(s);
+    }
+    basic_free_heap(tmp);
+    setbasic_free(set);
+    result
 }
 
 impl Drop for Expr {

@@ -100,6 +100,42 @@ const se = await SymEngine({
 2. Record while running computations
 3. Look for long WASM frames
 
+## `wasm32-unknown-unknown` Issues
+
+### `RuntimeError: memory access out of bounds` (allocator conflict)
+
+**Cause:** Both wasi-libc and Rust ship their own dlmalloc. Two allocators
+managing the same heap corrupt memory.
+
+**Solution:** The build script strips dlmalloc from libc.a and the Rust example
+provides malloc/free/calloc/realloc from Rust's allocator. If you are writing
+your own project, see `examples/rust-trunk/src/lib.rs` for the allocator bridge.
+
+### `RuntimeError: unreachable` in `__wasm_call_dtors`
+
+**Cause:** wasm-bindgen's "command" pattern calls `__wasm_call_ctors` /
+`__wasm_call_dtors` around every export invocation. C++ global destructors
+destroy SymEngine's static constants, then subsequent calls crash.
+
+**Solution:** Stub `__cxa_atexit` as a no-op to prevent destructor registration.
+See `examples/rust-trunk/wasi_stub.c`.
+
+### Duplicate symbol `erf` (or `sin`, `cos`, etc.)
+
+**Cause:** wasm-bindgen export names conflict with C library math functions in
+libc.a.
+
+**Solution:** Prefix Rust function names with `sym_` (e.g., `sym_sin`,
+`sym_erf`). Do not use `#[wasm_bindgen(js_name = "...")]` — it still creates
+conflicting wasm export names.
+
+### `-fno-exceptions` and error handling
+
+The `wasm32-unknown-unknown` build disables C++ exceptions. If SymEngine
+encounters an error (e.g., invalid expression), `std::terminate()` is called,
+which traps the WASM instance. Validate inputs on the Rust/JS side before
+passing them to SymEngine.
+
 ## Reporting Issues
 
 Include:

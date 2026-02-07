@@ -38,13 +38,10 @@ ls dist/
 
 ## Using Pre-built Binaries
 
-If available, you can download pre-built WASM modules:
+Pre-built WASM modules are available from [GitHub Releases](https://github.com/FizzWizZleDazzle/symengine.js/releases):
 
 ```bash
-# From npm (if published)
-npm install symengine-wasm
-
-# Or download release artifacts
+# Download latest release
 curl -LO https://github.com/FizzWizZleDazzle/symengine.js/releases/latest/download/symengine-wasm.tar.gz
 tar xzf symengine-wasm.tar.gz
 ```

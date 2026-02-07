@@ -33,10 +33,10 @@ console.log(result.evalFloat());
 // Output: 27
 ```
 
-## Build Modes
+## Build Targets
 
-| Mode | Output | Use Case |
-|------|--------|----------|
-| `standalone` | `.js` + `.wasm` | Direct use in JS/TS projects |
-| `side` | `.wasm` only | Dynamic linking with other WASM |
-| `static` | `.a` archive | Static linking in build systems |
+| Target | Output | Use Case |
+|--------|--------|----------|
+| `standalone` | `.js` + `.wasm` | Direct use in JS/TS projects (Emscripten) |
+| `side` | `.wasm` only | Dynamic linking with other WASM (Emscripten) |
+| `--arch=unknown` | `libsymengine.a` | Static library for Rust/`wasm32-unknown-unknown` |

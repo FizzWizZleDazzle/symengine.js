@@ -131,13 +131,34 @@ console.log(expr.toLatex());    // x^{2} + \sin{y}
 console.log(expr.toMathML());   // <math>...</math>
 ```
 
+## Rust / `wasm32-unknown-unknown`
+
+SymEngine can also be used from Rust WebAssembly projects targeting
+`wasm32-unknown-unknown` (the standard target for [Trunk](https://trunkrs.dev/)
+and `wasm-bindgen`). A complete working example is in `examples/rust-trunk/`.
+
+```bash
+# Build the static library
+./build_wasm.sh --arch=unknown --install-deps
+
+# Run the Rust+Trunk demo
+cd examples/rust-trunk
+trunk serve
+```
+
+See the [Rust + Trunk guide](https://fizzwizzledazzle.github.io/symengine.js/rust-wasm-unknown.html) for details.
+
 ## Building from Source
 
-Requires [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html).
+Requires [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) for the JavaScript target,
+or [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) for the Rust/`wasm32-unknown-unknown` target.
 
 ```bash
 # Build standalone module with JavaScript bindings
 ./build_wasm.sh --mode=standalone --with-embind --single-file
+
+# Build static library for Rust
+./build_wasm.sh --arch=unknown --install-deps
 
 # See all options
 ./build_wasm.sh --help
@@ -147,13 +168,16 @@ Requires [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.
 
 | Option | Description |
 |--------|-------------|
-| `--mode=standalone` | Build with JS glue code (default) |
+| `--arch=emscripten` | Target Emscripten (default) |
+| `--arch=unknown` | Target `wasm32-unknown-unknown` (static library for Rust) |
+| `--mode=standalone` | Build with JS glue code (default, Emscripten only) |
 | `--integer=boostmp` | Use Boost.Multiprecision (default, no GMP) |
 | `--integer=gmp` | Use GMP (faster, LGPL licensed) |
-| `--with-embind` | Include JavaScript bindings |
+| `--with-embind` | Include JavaScript bindings (Emscripten only) |
 | `--single-file` | Bundle WASM into JS (no separate .wasm file) |
 | `--build-type=Release` | Release build (default) |
 | `--build-type=MinSizeRel` | Optimize for size |
+| `--wasi-sdk=/path` | Override wasi-sdk location (for `--arch=unknown`) |
 
 ## Variants
 

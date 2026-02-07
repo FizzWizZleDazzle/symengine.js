@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod symengine;
 mod symengine_ffi;
 
@@ -103,6 +104,37 @@ pub unsafe extern "C" fn __libc_calloc(nmemb: usize, size: usize) -> *mut u8 {
 // wasm-bindgen exports
 // ---------------------------------------------------------------------------
 
+/// Generate a #[wasm_bindgen] unary export: parse expr, call method, return string.
+macro_rules! wasm_unary {
+    ($name:ident, $method:ident) => {
+        #[wasm_bindgen]
+        pub fn $name(expr: &str) -> String {
+            symengine::Expr::parse(expr).$method().to_string()
+        }
+    };
+}
+
+/// Generate a #[wasm_bindgen] binary export: parse both args, call method, return string.
+macro_rules! wasm_binary {
+    ($name:ident, $method:ident) => {
+        #[wasm_bindgen]
+        pub fn $name(a: &str, b: &str) -> String {
+            symengine::Expr::parse(a)
+                .$method(&symengine::Expr::parse(b))
+                .to_string()
+        }
+    };
+}
+
+/// Parse comma-separated expressions into a Matrix.
+fn parse_matrix(rows: u32, cols: u32, csv: &str) -> symengine::Matrix {
+    let elems: Vec<symengine::Expr> = csv
+        .split(',')
+        .map(|s| symengine::Expr::parse(s.trim()))
+        .collect();
+    symengine::Matrix::from_vec(rows, cols, &elems)
+}
+
 // ===================== Version =====================
 
 #[wasm_bindgen]
@@ -112,10 +144,7 @@ pub fn symengine_version_str() -> String {
 
 // ===================== Core operations =====================
 
-#[wasm_bindgen]
-pub fn expand(expr: &str) -> String {
-    symengine::Expr::parse(expr).expand().to_string()
-}
+wasm_unary!(expand, expand);
 
 #[wasm_bindgen]
 pub fn differentiate(expr: &str, var: &str) -> String {
@@ -124,7 +153,6 @@ pub fn differentiate(expr: &str, var: &str) -> String {
     e.diff(&v).to_string()
 }
 
-/// Substitute `var` → `value` in `expr`.
 #[wasm_bindgen]
 pub fn substitute(expr: &str, var: &str, value: &str) -> String {
     let e = symengine::Expr::parse(expr);
@@ -133,19 +161,16 @@ pub fn substitute(expr: &str, var: &str, value: &str) -> String {
     e.subs(&from, &to).to_string()
 }
 
-/// Numerical evaluation to 53-bit precision (double).
 #[wasm_bindgen]
 pub fn evalf(expr: &str) -> String {
     symengine::Expr::parse(expr).evalf(53).to_string()
 }
 
-/// Return free symbols in the expression, comma-separated.
 #[wasm_bindgen]
 pub fn free_symbols(expr: &str) -> String {
     symengine::Expr::parse(expr).free_symbols().join(", ")
 }
 
-/// Solve polynomial equation `expr = 0` for `var`. Returns solutions comma-separated.
 #[wasm_bindgen]
 pub fn solve_poly(expr: &str, var: &str) -> String {
     let e = symengine::Expr::parse(expr);
@@ -155,130 +180,43 @@ pub fn solve_poly(expr: &str, var: &str) -> String {
 
 // ===================== Arithmetic =====================
 
-#[wasm_bindgen]
-pub fn add(a: &str, b: &str) -> String {
-    symengine::Expr::parse(a).add(&symengine::Expr::parse(b)).to_string()
-}
-
-#[wasm_bindgen]
-pub fn sub(a: &str, b: &str) -> String {
-    symengine::Expr::parse(a).sub(&symengine::Expr::parse(b)).to_string()
-}
-
-#[wasm_bindgen]
-pub fn mul(a: &str, b: &str) -> String {
-    symengine::Expr::parse(a).mul(&symengine::Expr::parse(b)).to_string()
-}
-
-#[wasm_bindgen]
-pub fn div(a: &str, b: &str) -> String {
-    symengine::Expr::parse(a).div(&symengine::Expr::parse(b)).to_string()
-}
-
-#[wasm_bindgen]
-pub fn pow(base: &str, exp: &str) -> String {
-    symengine::Expr::parse(base).pow(&symengine::Expr::parse(exp)).to_string()
-}
-
-#[wasm_bindgen]
-pub fn neg(expr: &str) -> String {
-    symengine::Expr::parse(expr).neg().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_abs(expr: &str) -> String {
-    symengine::Expr::parse(expr).abs().to_string()
-}
+wasm_binary!(add, add);
+wasm_binary!(sub, sub);
+wasm_binary!(mul, mul);
+wasm_binary!(div, div);
+wasm_binary!(pow, pow);
+wasm_unary!(neg, neg);
+wasm_unary!(sym_abs, abs);
 
 // ===================== Trigonometric =====================
 // Rust fn names prefixed with `sym_` to avoid clashing with C math symbols
-// in libc.a.  The `js_name` attribute keeps clean names for JavaScript.
+// in libc.a.
 
-#[wasm_bindgen]
-pub fn sym_sin(expr: &str) -> String {
-    symengine::Expr::parse(expr).sin().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_cos(expr: &str) -> String {
-    symengine::Expr::parse(expr).cos().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_tan(expr: &str) -> String {
-    symengine::Expr::parse(expr).tan().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_asin(expr: &str) -> String {
-    symengine::Expr::parse(expr).asin().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_acos(expr: &str) -> String {
-    symengine::Expr::parse(expr).acos().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_atan(expr: &str) -> String {
-    symengine::Expr::parse(expr).atan().to_string()
-}
+wasm_unary!(sym_sin, sin);
+wasm_unary!(sym_cos, cos);
+wasm_unary!(sym_tan, tan);
+wasm_unary!(sym_asin, asin);
+wasm_unary!(sym_acos, acos);
+wasm_unary!(sym_atan, atan);
 
 // ===================== Hyperbolic =====================
 
-#[wasm_bindgen]
-pub fn sym_sinh(expr: &str) -> String {
-    symengine::Expr::parse(expr).sinh().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_cosh(expr: &str) -> String {
-    symengine::Expr::parse(expr).cosh().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_tanh(expr: &str) -> String {
-    symengine::Expr::parse(expr).tanh().to_string()
-}
+wasm_unary!(sym_sinh, sinh);
+wasm_unary!(sym_cosh, cosh);
+wasm_unary!(sym_tanh, tanh);
 
 // ===================== Exponential / Logarithmic =====================
 
-#[wasm_bindgen]
-pub fn sym_exp(expr: &str) -> String {
-    symengine::Expr::parse(expr).exp().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_log(expr: &str) -> String {
-    symengine::Expr::parse(expr).log().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_sqrt(expr: &str) -> String {
-    symengine::Expr::parse(expr).sqrt().to_string()
-}
+wasm_unary!(sym_exp, exp);
+wasm_unary!(sym_log, log);
+wasm_unary!(sym_sqrt, sqrt);
 
 // ===================== Special functions =====================
 
-#[wasm_bindgen]
-pub fn sym_gamma(expr: &str) -> String {
-    symengine::Expr::parse(expr).gamma().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_zeta(expr: &str) -> String {
-    symengine::Expr::parse(expr).zeta().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_erf(expr: &str) -> String {
-    symengine::Expr::parse(expr).erf().to_string()
-}
-
-#[wasm_bindgen]
-pub fn sym_lambertw(expr: &str) -> String {
-    symengine::Expr::parse(expr).lambertw().to_string()
-}
+wasm_unary!(sym_gamma, gamma);
+wasm_unary!(sym_zeta, zeta);
+wasm_unary!(sym_erf, erf);
+wasm_unary!(sym_lambertw, lambertw);
 
 // ===================== Number theory =====================
 
@@ -314,14 +252,12 @@ pub fn binomial(n: &str, k: u32) -> String {
 
 // ===================== Algebraic =====================
 
-/// Return "numerator | denominator" of the expression.
 #[wasm_bindgen]
 pub fn numer_denom(expr: &str) -> String {
     let (n, d) = symengine::Expr::parse(expr).numer_denom();
     format!("{} | {}", n.to_string(), d.to_string())
 }
 
-/// Coefficient of var^n in expr.
 #[wasm_bindgen]
 pub fn coeff(expr: &str, var: &str, n: i32) -> String {
     let e = symengine::Expr::parse(expr);
@@ -332,73 +268,38 @@ pub fn coeff(expr: &str, var: &str, n: i32) -> String {
 
 // ===================== String representations =====================
 
-#[wasm_bindgen]
-pub fn to_latex(expr: &str) -> String {
-    symengine::Expr::parse(expr).to_latex()
-}
-
-#[wasm_bindgen]
-pub fn to_mathml(expr: &str) -> String {
-    symengine::Expr::parse(expr).to_mathml()
-}
-
-#[wasm_bindgen]
-pub fn to_ccode(expr: &str) -> String {
-    symengine::Expr::parse(expr).to_ccode()
-}
-
-#[wasm_bindgen]
-pub fn to_jscode(expr: &str) -> String {
-    symengine::Expr::parse(expr).to_jscode()
-}
+wasm_unary!(to_latex, to_latex);
+wasm_unary!(to_mathml, to_mathml);
+wasm_unary!(to_ccode, to_ccode);
+wasm_unary!(to_jscode, to_jscode);
 
 // ===================== Matrix operations =====================
 
-/// Compute the determinant of a symbolic matrix.
-/// Elements are given as comma-separated expressions, row-major.
-/// Example: matrix_det(2, 2, "a, b, c, d") → "a*d - b*c"
+/// Determinant. Elements as CSV, row-major. E.g. matrix_det(2, 2, "a, b, c, d")
 #[wasm_bindgen]
 pub fn matrix_det(rows: u32, cols: u32, elements_csv: &str) -> String {
-    let elems: Vec<symengine::Expr> = elements_csv
-        .split(',')
-        .map(|s| symengine::Expr::parse(s.trim()))
-        .collect();
-    let m = symengine::Matrix::from_vec(rows, cols, &elems);
-    m.det().to_string()
+    parse_matrix(rows, cols, elements_csv).det().to_string()
 }
 
-/// Multiply two matrices. Elements are comma-separated, row-major.
-/// Returns the result matrix as a string.
+/// Multiply two matrices (CSV, row-major).
 #[wasm_bindgen]
 pub fn matrix_mul(
     rows_a: u32, cols_a: u32, a_csv: &str,
     rows_b: u32, cols_b: u32, b_csv: &str,
 ) -> String {
-    let ea: Vec<symengine::Expr> = a_csv.split(',').map(|s| symengine::Expr::parse(s.trim())).collect();
-    let eb: Vec<symengine::Expr> = b_csv.split(',').map(|s| symengine::Expr::parse(s.trim())).collect();
-    let ma = symengine::Matrix::from_vec(rows_a, cols_a, &ea);
-    let mb = symengine::Matrix::from_vec(rows_b, cols_b, &eb);
+    let ma = parse_matrix(rows_a, cols_a, a_csv);
+    let mb = parse_matrix(rows_b, cols_b, b_csv);
     ma.mul(&mb).to_string()
 }
 
-/// Invert a square matrix. Elements are comma-separated, row-major.
+/// Invert a square matrix (CSV, row-major).
 #[wasm_bindgen]
 pub fn matrix_inv(rows: u32, cols: u32, elements_csv: &str) -> String {
-    let elems: Vec<symengine::Expr> = elements_csv
-        .split(',')
-        .map(|s| symengine::Expr::parse(s.trim()))
-        .collect();
-    let m = symengine::Matrix::from_vec(rows, cols, &elems);
-    m.inv().to_string()
+    parse_matrix(rows, cols, elements_csv).inv().to_string()
 }
 
-/// Transpose a matrix. Elements are comma-separated, row-major.
+/// Transpose a matrix (CSV, row-major).
 #[wasm_bindgen]
 pub fn matrix_transpose(rows: u32, cols: u32, elements_csv: &str) -> String {
-    let elems: Vec<symengine::Expr> = elements_csv
-        .split(',')
-        .map(|s| symengine::Expr::parse(s.trim()))
-        .collect();
-    let m = symengine::Matrix::from_vec(rows, cols, &elems);
-    m.transpose().to_string()
+    parse_matrix(rows, cols, elements_csv).transpose().to_string()
 }
