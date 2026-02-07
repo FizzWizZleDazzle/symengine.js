@@ -19,6 +19,7 @@
 - [Overview](./dynamic-linking/overview.md)
 - [C++ Integration](./dynamic-linking/cpp.md)
 - [Rust Integration](./dynamic-linking/rust.md)
+- [Rust + Trunk (wasm32-unknown-unknown)](./rust-wasm-unknown.md)
 - [Runtime Loading](./dynamic-linking/runtime.md)
 
 # API Reference

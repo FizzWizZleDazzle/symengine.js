@@ -4,7 +4,8 @@
 # Convenience wrapper around the build script
 #
 
-.PHONY: all standalone side deps clean distclean help test
+.PHONY: all standalone side deps clean distclean help test \
+       wasm-unknown wasm-unknown-gmp wasm-unknown-clean
 
 # Default: build standalone module with embind
 all: standalone
@@ -43,6 +44,16 @@ debug: deps
 minsize: deps
 	./build_wasm.sh --mode=standalone --with-embind --build-type=MinSizeRel
 
+# Build static library for wasm32-unknown-unknown (Rust/Trunk)
+wasm-unknown: deps
+	./build_wasm.sh --arch=unknown
+
+wasm-unknown-gmp: deps
+	./build_wasm.sh --arch=unknown --integer=gmp
+
+wasm-unknown-clean:
+	rm -rf build/symengine-wasm-unknown build/gmp-wasm-unknown dist/wasm-unknown
+
 # Clean build artifacts
 clean:
 	rm -rf build
@@ -75,6 +86,9 @@ help:
 	@echo "  standalone-threads - Build with pthread support"
 	@echo "  debug         - Build debug version"
 	@echo "  minsize       - Build optimized for size"
+	@echo "  wasm-unknown  - Build static lib for wasm32-unknown-unknown (Rust/Trunk)"
+	@echo "  wasm-unknown-gmp - Build wasm-unknown with GMP"
+	@echo "  wasm-unknown-clean - Clean wasm-unknown build artifacts"
 	@echo "  clean         - Remove build directory"
 	@echo "  distclean     - Remove all generated files and dependencies"
 	@echo "  test          - Run basic tests"
@@ -82,6 +96,7 @@ help:
 	@echo ""
 	@echo "Environment Variables:"
 	@echo "  EMSDK         - Path to Emscripten SDK"
+	@echo "  WASI_SDK_PATH - Path to wasi-sdk (for wasm-unknown targets)"
 	@echo "  JOBS          - Number of parallel build jobs"
 	@echo ""
 	@echo "For more options, run: ./build_wasm.sh --help"

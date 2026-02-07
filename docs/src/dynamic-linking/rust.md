@@ -2,6 +2,11 @@
 
 Link SymEngine WASM with your Rust WebAssembly project.
 
+> **Tip**: If you are using **Trunk** and `wasm-bindgen` with the
+> `wasm32-unknown-unknown` target, see the dedicated
+> [Rust + Trunk (wasm32-unknown-unknown)](../rust-wasm-unknown.md) guide instead.
+> This page covers the Emscripten-based approach.
+
 ## Important Notes
 
 > **Warning**: Rust's WASM target has limited dynamic linking support.

@@ -9,7 +9,8 @@
 #   ./build_wasm.sh [OPTIONS]
 #
 # Options:
-#   --mode=<standalone|side>   Build mode (default: standalone)
+#   --arch=<emscripten|unknown> Target arch (default: emscripten)
+#   --mode=<standalone|side>   Build mode (default: standalone, emscripten only)
 #   --integer=<gmp|boostmp>    Integer class to use (default: boostmp)
 #   --build-type=<Release|Debug|MinSizeRel>  Build type (default: Release)
 #   --threads                   Enable thread safety (experimental)
@@ -18,10 +19,12 @@
 #   --skip-symengine            Only build dependencies, skip SymEngine
 #   --with-embind               Include embind JavaScript bindings
 #   --single-file               Bundle WASM into JS file (no separate .wasm)
+#   --wasi-sdk=<path>           Path to wasi-sdk (for --arch=unknown)
 #   --help                      Show this help message
 #
 # Environment variables:
 #   EMSDK                       Path to Emscripten SDK (auto-detected if not set)
+#   WASI_SDK_PATH               Path to wasi-sdk installation (for --arch=unknown)
 #   SYMENGINE_SRC               Path to SymEngine source (default: ./symengine)
 #   BUILD_DIR                   Build directory (default: ./build)
 #   INSTALL_PREFIX              Installation prefix (default: ./dist)
@@ -42,6 +45,7 @@ INSTALL_PREFIX="${INSTALL_PREFIX:-$SCRIPT_DIR/dist}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 # Build options (defaults)
+ARCH="emscripten"         # emscripten or unknown (wasm32-unknown-unknown)
 BUILD_MODE="standalone"   # standalone or side (SIDE_MODULE)
 INTEGER_CLASS="boostmp"   # gmp or boostmp
 BUILD_TYPE="Release"
@@ -90,7 +94,7 @@ die() {
 }
 
 show_help() {
-    head -n 25 "$0" | tail -n 23 | sed 's/^#//'
+    head -n 32 "$0" | tail -n 30 | sed 's/^#//'
     exit 0
 }
 
@@ -105,6 +109,14 @@ check_command() {
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --arch=*)
+                ARCH="${1#*=}"
+                [[ "$ARCH" == "emscripten" || "$ARCH" == "unknown" ]] || \
+                    die "Invalid arch: $ARCH (must be 'emscripten' or 'unknown')"
+                ;;
+            --wasi-sdk=*)
+                WASI_SDK_PATH="${1#*=}"
+                ;;
             --mode=*)
                 BUILD_MODE="${1#*=}"
                 [[ "$BUILD_MODE" == "standalone" || "$BUILD_MODE" == "side" ]] || \
@@ -189,6 +201,218 @@ setup_emscripten() {
 
     EMCC_VERSION=$(emcc --version | head -n1)
     log_info "Emscripten version: $EMCC_VERSION"
+}
+
+# =============================================================================
+# wasm32-unknown-unknown Setup (via wasi-sdk)
+# =============================================================================
+
+setup_wasi_sdk() {
+    log_info "Setting up wasi-sdk environment..."
+
+    # Try to find wasi-sdk
+    if [[ -z "${WASI_SDK_PATH:-}" ]]; then
+        local search_paths=(
+            "/opt/wasi-sdk"
+            "$HOME/wasi-sdk"
+            "$SCRIPT_DIR/wasi-sdk"
+        )
+        for path in "${search_paths[@]}"; do
+            if [[ -d "$path" && -f "$path/bin/clang" ]]; then
+                WASI_SDK_PATH="$path"
+                break
+            fi
+        done
+    fi
+
+    if [[ -z "${WASI_SDK_PATH:-}" ]]; then
+        die "wasi-sdk not found. Install it and set WASI_SDK_PATH, pass --wasi-sdk=<path>, or place it at /opt/wasi-sdk."
+    fi
+
+    if [[ ! -f "$WASI_SDK_PATH/bin/clang" ]]; then
+        die "wasi-sdk clang not found at $WASI_SDK_PATH/bin/clang"
+    fi
+
+    export WASI_SDK_PATH
+    WASI_CC="$WASI_SDK_PATH/bin/clang"
+    WASI_CXX="$WASI_SDK_PATH/bin/clang++"
+    WASI_AR="$WASI_SDK_PATH/bin/llvm-ar"
+    WASI_RANLIB="$WASI_SDK_PATH/bin/llvm-ranlib"
+    WASI_SYSROOT="$WASI_SDK_PATH/share/wasi-sysroot"
+
+    log_info "Using wasi-sdk at: $WASI_SDK_PATH"
+    log_info "Clang version: $($WASI_CC --version | head -n1)"
+}
+
+build_gmp_wasm_unknown() {
+    local gmp_build_dir="$BUILD_DIR/gmp-wasm-unknown"
+    local gmp_install_dir="$DEPS_DIR/gmp-wasm-unknown"
+
+    if [[ -f "$gmp_install_dir/lib/libgmp.a" ]]; then
+        log_info "GMP (wasm-unknown) already built at $gmp_install_dir"
+        return 0
+    fi
+
+    log_info "Building GMP $GMP_VERSION for wasm32-unknown-unknown..."
+    mkdir -p "$gmp_build_dir" "$gmp_install_dir"
+
+    # Download GMP (shared with emscripten path)
+    local gmp_src="$DEPS_DIR/gmp-${GMP_VERSION}"
+    if [[ ! -d "$gmp_src" ]]; then
+        log_info "Downloading GMP..."
+        local gmp_url="https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+        curl -fsSL "$gmp_url" -o "$DEPS_DIR/gmp.tar.xz"
+        tar xJf "$DEPS_DIR/gmp.tar.xz" -C "$DEPS_DIR"
+        rm "$DEPS_DIR/gmp.tar.xz"
+    fi
+
+    cd "$gmp_build_dir"
+
+    local wasm_cflags="--target=wasm32-unknown-unknown --sysroot=$WASI_SYSROOT -O2 -fno-exceptions"
+
+    "$gmp_src/configure" \
+        --prefix="$gmp_install_dir" \
+        --host=none \
+        --disable-assembly \
+        --enable-static \
+        --disable-shared \
+        CC="$WASI_CC" \
+        CXX="$WASI_CXX" \
+        AR="$WASI_AR" \
+        RANLIB="$WASI_RANLIB" \
+        CFLAGS="$wasm_cflags" \
+        CXXFLAGS="$wasm_cflags"
+
+    make -j"$JOBS"
+    make install
+
+    cd "$SCRIPT_DIR"
+    log_success "GMP (wasm-unknown) built successfully"
+}
+
+build_symengine_lib_unknown() {
+    log_info "Building SymEngine library for wasm32-unknown-unknown..."
+
+    local symengine_build_dir="$BUILD_DIR/symengine-wasm-unknown"
+
+    if [[ "$CLEAN_BUILD" == true ]]; then
+        rm -rf "$symengine_build_dir"
+    fi
+
+    mkdir -p "$symengine_build_dir"
+    cd "$symengine_build_dir"
+
+    local cmake_args=(
+        "-DCMAKE_TOOLCHAIN_FILE=$SCRIPT_DIR/cmake/Wasm32UnknownToolchain.cmake"
+        "-DWASI_SDK_PREFIX=$WASI_SDK_PATH"
+        "-DCMAKE_BUILD_TYPE=$BUILD_TYPE"
+        "-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX/wasm-unknown"
+        "-DINTEGER_CLASS=$INTEGER_CLASS"
+    )
+
+    if [[ "$INTEGER_CLASS" == "boostmp" ]]; then
+        cmake_args+=(
+            "-DWITH_GMP=OFF"
+            "-DWITH_MPFR=OFF"
+            "-DWITH_MPC=OFF"
+            "-DWITH_FLINT=OFF"
+            "-DWITH_ARB=OFF"
+            "-DBoost_INCLUDE_DIR=$DEPS_DIR/boost"
+        )
+    else
+        cmake_args+=(
+            "-DWITH_GMP=ON"
+            "-DGMP_INCLUDE_DIR=$DEPS_DIR/gmp-wasm-unknown/include"
+            "-DGMP_LIBRARY=$DEPS_DIR/gmp-wasm-unknown/lib/libgmp.a"
+            "-DWITH_MPFR=OFF"
+            "-DWITH_MPC=OFF"
+        )
+    fi
+
+    log_info "Configuring SymEngine (wasm-unknown)..."
+    cmake "${cmake_args[@]}" "$SYMENGINE_SRC"
+
+    log_info "Compiling SymEngine (wasm-unknown)..."
+    make -j"$JOBS" symengine
+
+    cd "$SCRIPT_DIR"
+    log_success "SymEngine library built (wasm-unknown)"
+}
+
+build_wasm_unknown_module() {
+    log_info "Installing wasm32-unknown-unknown artifacts..."
+
+    local symengine_build_dir="$BUILD_DIR/symengine-wasm-unknown"
+    local output_lib_dir="$INSTALL_PREFIX/wasm-unknown/lib"
+    local output_inc_dir="$INSTALL_PREFIX/wasm-unknown/include/symengine"
+
+    mkdir -p "$output_lib_dir" "$output_inc_dir"
+
+    # Copy static library
+    local symengine_lib="$symengine_build_dir/symengine/libsymengine.a"
+    if [[ ! -f "$symengine_lib" ]]; then
+        die "SymEngine library not found at $symengine_lib"
+    fi
+    cp "$symengine_lib" "$output_lib_dir/"
+
+    # Copy GMP library if using GMP
+    if [[ "$INTEGER_CLASS" == "gmp" ]]; then
+        local gmp_lib="$DEPS_DIR/gmp-wasm-unknown/lib/libgmp.a"
+        if [[ -f "$gmp_lib" ]]; then
+            cp "$gmp_lib" "$output_lib_dir/"
+        fi
+    fi
+
+    # Copy headers
+    install_headers "$output_inc_dir" "$symengine_build_dir"
+
+    log_success "Artifacts installed to $INSTALL_PREFIX/wasm-unknown/"
+
+    # Print summary
+    echo ""
+    log_info "Build Summary:"
+    echo "  Arch: wasm32-unknown-unknown"
+    echo "  Integer Class: $INTEGER_CLASS"
+    echo "  Build Type: $BUILD_TYPE"
+    echo "  Library: $output_lib_dir/libsymengine.a"
+    echo "  Headers: $output_inc_dir/"
+
+    local lib_size
+    lib_size=$(du -h "$output_lib_dir/libsymengine.a" | cut -f1)
+    echo "  Library Size: $lib_size"
+}
+
+install_headers() {
+    local dest_dir="$1"
+    local build_dir="$2"
+
+    # cwrapper.h from source
+    cp "$SYMENGINE_SRC/symengine/cwrapper.h" "$dest_dir/"
+
+    # symengine_config.h is generated by CMake into the build directory
+    cp "$build_dir/symengine/symengine_config.h" "$dest_dir/"
+
+    # symengine_exception.h from source
+    cp "$SYMENGINE_SRC/symengine/symengine_exception.h" "$dest_dir/"
+
+    log_info "Headers installed to $dest_dir"
+}
+
+# =============================================================================
+# Dependency Management (wasm-unknown)
+# =============================================================================
+
+install_dependencies_unknown() {
+    log_info "Installing dependencies (wasm-unknown)..."
+
+    download_symengine
+    download_boost  # Always needed (header-only utilities)
+
+    if [[ "$INTEGER_CLASS" == "gmp" ]]; then
+        build_gmp_wasm_unknown
+    fi
+
+    log_success "Dependencies installed (wasm-unknown)"
 }
 
 # =============================================================================
@@ -734,28 +958,57 @@ main() {
     check_command cmake
     check_command curl
     check_command tar
-    setup_emscripten
 
-    # Install dependencies if requested or needed
-    local need_deps=false
-    if [[ "$INSTALL_DEPS" == true ]]; then
-        need_deps=true
-    elif [[ ! -d "$SYMENGINE_SRC" ]]; then
-        need_deps=true
-    elif [[ "$INTEGER_CLASS" == "gmp" ]] && [[ ! -f "$DEPS_DIR/gmp-wasm/lib/libgmp.a" ]]; then
-        need_deps=true
-    elif [[ "$INTEGER_CLASS" == "boostmp" ]] && [[ ! -d "$DEPS_DIR/boost" ]]; then
-        need_deps=true
-    fi
+    if [[ "$ARCH" == "unknown" ]]; then
+        # ---- wasm32-unknown-unknown path (via wasi-sdk) ----
+        setup_wasi_sdk
 
-    if [[ "$need_deps" == true ]]; then
-        install_dependencies
-    fi
+        # Install dependencies if requested or needed
+        local need_deps_unknown=false
+        if [[ "$INSTALL_DEPS" == true ]]; then
+            need_deps_unknown=true
+        elif [[ ! -d "$SYMENGINE_SRC" ]]; then
+            need_deps_unknown=true
+        elif [[ "$INTEGER_CLASS" == "gmp" ]] && [[ ! -f "$DEPS_DIR/gmp-wasm-unknown/lib/libgmp.a" ]]; then
+            need_deps_unknown=true
+        elif [[ "$INTEGER_CLASS" == "boostmp" ]] && [[ ! -d "$DEPS_DIR/boost" ]]; then
+            need_deps_unknown=true
+        fi
 
-    # Build SymEngine
-    if [[ "$SKIP_SYMENGINE" != true ]]; then
-        build_symengine_lib
-        build_wasm_module
+        if [[ "$need_deps_unknown" == true ]]; then
+            install_dependencies_unknown
+        fi
+
+        # Build SymEngine
+        if [[ "$SKIP_SYMENGINE" != true ]]; then
+            build_symengine_lib_unknown
+            build_wasm_unknown_module
+        fi
+    else
+        # ---- wasm32-unknown-emscripten path (existing) ----
+        setup_emscripten
+
+        # Install dependencies if requested or needed
+        local need_deps=false
+        if [[ "$INSTALL_DEPS" == true ]]; then
+            need_deps=true
+        elif [[ ! -d "$SYMENGINE_SRC" ]]; then
+            need_deps=true
+        elif [[ "$INTEGER_CLASS" == "gmp" ]] && [[ ! -f "$DEPS_DIR/gmp-wasm/lib/libgmp.a" ]]; then
+            need_deps=true
+        elif [[ "$INTEGER_CLASS" == "boostmp" ]] && [[ ! -d "$DEPS_DIR/boost" ]]; then
+            need_deps=true
+        fi
+
+        if [[ "$need_deps" == true ]]; then
+            install_dependencies
+        fi
+
+        # Build SymEngine
+        if [[ "$SKIP_SYMENGINE" != true ]]; then
+            build_symengine_lib
+            build_wasm_module
+        fi
     fi
 
     echo ""
