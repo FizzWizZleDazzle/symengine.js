@@ -268,7 +268,7 @@ build_gmp_wasm_unknown() {
 
     cd "$gmp_build_dir"
 
-    local wasm_cflags="--target=wasm32-unknown-unknown --sysroot=$WASI_SYSROOT -O2 -fno-exceptions"
+    local wasm_cflags="--target=wasm32-wasi --sysroot=$WASI_SYSROOT -O2 -fno-exceptions"
 
     "$gmp_src/configure" \
         --prefix="$gmp_install_dir" \
@@ -361,6 +361,29 @@ build_wasm_unknown_module() {
         if [[ -f "$gmp_lib" ]]; then
             cp "$gmp_lib" "$output_lib_dir/"
         fi
+    fi
+
+    # Copy wasi-sdk C/C++ runtime libraries (needed by C++ code in libsymengine).
+    local wasi_lib_dir="$WASI_SDK_PATH/share/wasi-sysroot/lib/wasm32-wasi"
+    for lib in libc++.a libc++abi.a; do
+        if [[ -f "$wasi_lib_dir/$lib" ]]; then
+            cp "$wasi_lib_dir/$lib" "$output_lib_dir/"
+        else
+            log_warn "wasi-sdk library not found: $wasi_lib_dir/$lib"
+        fi
+    done
+
+    # Ship a stripped libc.a WITHOUT dlmalloc/sbrk.  The Rust project
+    # provides malloc/free/calloc/realloc that delegate to Rust's
+    # allocator, avoiding a dual-allocator conflict at runtime.
+    if [[ -f "$wasi_lib_dir/libc.a" ]]; then
+        cp "$wasi_lib_dir/libc.a" "$output_lib_dir/libc.a"
+        local ar_tool
+        ar_tool="$(command -v llvm-ar-18 2>/dev/null || command -v llvm-ar 2>/dev/null || echo "$WASI_SDK_PATH/bin/llvm-ar")"
+        "$ar_tool" d "$output_lib_dir/libc.a" dlmalloc.o sbrk.o atexit.o __cxa_atexit.o 2>/dev/null || true
+        log_info "Stripped dlmalloc/sbrk/atexit from libc.a (Rust provides allocator; stubs prevent global dtors)"
+    else
+        log_warn "wasi-sdk library not found: $wasi_lib_dir/libc.a"
     fi
 
     # Copy headers

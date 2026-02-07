@@ -9,7 +9,7 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: system-ui, -apple-system, sans-serif;
-            max-width: 640px;
+            max-width: 720px;
             margin: 2rem auto;
             padding: 0 1rem;
             color: #1a1a1a;
@@ -25,6 +25,8 @@
             border-radius: 4px;
             font-size: 1rem;
         }
+        .row { display: flex; gap: 0.5rem; }
+        .row > * { flex: 1; }
         button {
             margin-top: 1rem;
             padding: 0.5rem 1.5rem;
@@ -46,6 +48,8 @@
             min-height: 2rem;
         }
         #version { margin-top: 2rem; color: #999; font-size: 0.85rem; }
+        details { margin-top: 0.5rem; }
+        summary { cursor: pointer; color: #555; font-size: 0.9rem; }
     </style>
 </head>
 <body>
@@ -55,50 +59,183 @@
     <label for="expr">Expression</label>
     <input id="expr" type="text" value="x**3 + 2*x**2 + x" placeholder="e.g. sin(x)*cos(x)" />
 
-    <label for="var">Variable</label>
-    <input id="var" type="text" value="x" placeholder="e.g. x" />
+    <div class="row">
+        <div>
+            <label for="var">Variable</label>
+            <input id="var" type="text" value="x" placeholder="e.g. x" />
+        </div>
+        <div>
+            <label for="var2">2nd argument</label>
+            <input id="var2" type="text" value="" placeholder="(optional)" />
+        </div>
+    </div>
 
     <label for="op">Operation</label>
     <select id="op">
-        <option value="diff">Differentiate</option>
-        <option value="expand">Expand</option>
-        <option value="latex">To LaTeX</option>
+        <optgroup label="Core">
+            <option value="diff">Differentiate</option>
+            <option value="expand">Expand</option>
+            <option value="substitute">Substitute var → 2nd arg</option>
+            <option value="evalf">Numerical evaluation</option>
+            <option value="free_symbols">Free symbols</option>
+            <option value="solve_poly">Solve polynomial = 0</option>
+        </optgroup>
+        <optgroup label="Arithmetic">
+            <option value="add">Add (expr + 2nd arg)</option>
+            <option value="sub">Subtract (expr - 2nd arg)</option>
+            <option value="mul">Multiply (expr * 2nd arg)</option>
+            <option value="div">Divide (expr / 2nd arg)</option>
+            <option value="pow">Power (expr ^ 2nd arg)</option>
+            <option value="neg">Negate</option>
+            <option value="abs">Absolute value</option>
+        </optgroup>
+        <optgroup label="Trigonometric">
+            <option value="sin">sin</option>
+            <option value="cos">cos</option>
+            <option value="tan">tan</option>
+            <option value="asin">asin</option>
+            <option value="acos">acos</option>
+            <option value="atan">atan</option>
+        </optgroup>
+        <optgroup label="Hyperbolic">
+            <option value="sinh">sinh</option>
+            <option value="cosh">cosh</option>
+            <option value="tanh">tanh</option>
+        </optgroup>
+        <optgroup label="Exp / Log">
+            <option value="exp">exp</option>
+            <option value="log">log (natural)</option>
+            <option value="sqrt">sqrt</option>
+        </optgroup>
+        <optgroup label="Special Functions">
+            <option value="gamma">gamma</option>
+            <option value="zeta">zeta (Riemann)</option>
+            <option value="erf">erf (error function)</option>
+            <option value="lambertw">Lambert W</option>
+        </optgroup>
+        <optgroup label="Number Theory">
+            <option value="factorial">Factorial (expr = integer)</option>
+            <option value="fibonacci">Fibonacci (expr = integer)</option>
+            <option value="gcd">GCD (expr, 2nd arg)</option>
+            <option value="lcm">LCM (expr, 2nd arg)</option>
+            <option value="nextprime">Next prime after expr</option>
+            <option value="binomial">Binomial(expr, 2nd arg)</option>
+        </optgroup>
+        <optgroup label="Algebraic">
+            <option value="numer_denom">Numerator / Denominator</option>
+            <option value="coeff">Coefficient of var^(2nd arg)</option>
+        </optgroup>
+        <optgroup label="Output Formats">
+            <option value="latex">LaTeX</option>
+            <option value="mathml">MathML</option>
+            <option value="ccode">C code</option>
+            <option value="jscode">JavaScript code</option>
+        </optgroup>
+        <optgroup label="Matrix (CSV input)">
+            <option value="matrix_det">Determinant</option>
+            <option value="matrix_inv">Inverse</option>
+            <option value="matrix_transpose">Transpose</option>
+        </optgroup>
     </select>
 
     <button id="run">Compute</button>
 
     <div id="result"></div>
+
+    <details>
+        <summary>Matrix input help</summary>
+        <p style="margin-top:0.5rem;font-size:0.85rem;color:#555;">
+            For matrix operations, enter elements as comma-separated values in the Expression field.
+            Set Variable to "rows" and 2nd argument to "cols".<br/>
+            Example: Expression = <code>a, b, c, d</code>, Variable = <code>2</code>, 2nd arg = <code>2</code>
+        </p>
+    </details>
+
     <div id="version"></div>
 
-    <script type="module">
-        import init, { differentiate, expand, to_latex, symengine_version_str } from './pkg/symengine_rust_trunk.js';
-
-        async function main() {
-            await init();
+    <script>
+        addEventListener("TrunkApplicationStarted", () => {
+            const w = window.wasmBindings;
 
             document.getElementById('version').textContent =
-                'SymEngine ' + symengine_version_str();
+                'SymEngine ' + w.symengine_version_str();
 
             document.getElementById('run').addEventListener('click', () => {
                 const expr = document.getElementById('expr').value;
                 const v = document.getElementById('var').value;
+                const v2 = document.getElementById('var2').value;
                 const op = document.getElementById('op').value;
                 const out = document.getElementById('result');
 
                 try {
-                    if (op === 'diff') {
-                        out.textContent = differentiate(expr, v);
-                    } else if (op === 'expand') {
-                        out.textContent = expand(expr);
-                    } else {
-                        out.textContent = to_latex(expr);
+                    let r;
+                    switch (op) {
+                        // Core
+                        case 'diff':        r = w.differentiate(expr, v); break;
+                        case 'expand':      r = w.expand(expr); break;
+                        case 'substitute':  r = w.substitute(expr, v, v2); break;
+                        case 'evalf':       r = w.evalf(expr); break;
+                        case 'free_symbols':r = w.free_symbols(expr); break;
+                        case 'solve_poly':  r = w.solve_poly(expr, v); break;
+                        // Arithmetic
+                        case 'add':         r = w.add(expr, v2); break;
+                        case 'sub':         r = w.sub(expr, v2); break;
+                        case 'mul':         r = w.mul(expr, v2); break;
+                        case 'div':         r = w.div(expr, v2); break;
+                        case 'pow':         r = w.pow(expr, v2); break;
+                        case 'neg':         r = w.neg(expr); break;
+                        case 'abs':         r = w.sym_abs(expr); break;
+                        // Trig
+                        case 'sin':         r = w.sym_sin(expr); break;
+                        case 'cos':         r = w.sym_cos(expr); break;
+                        case 'tan':         r = w.sym_tan(expr); break;
+                        case 'asin':        r = w.sym_asin(expr); break;
+                        case 'acos':        r = w.sym_acos(expr); break;
+                        case 'atan':        r = w.sym_atan(expr); break;
+                        // Hyperbolic
+                        case 'sinh':        r = w.sym_sinh(expr); break;
+                        case 'cosh':        r = w.sym_cosh(expr); break;
+                        case 'tanh':        r = w.sym_tanh(expr); break;
+                        // Exp / Log
+                        case 'exp':         r = w.sym_exp(expr); break;
+                        case 'log':         r = w.sym_log(expr); break;
+                        case 'sqrt':        r = w.sym_sqrt(expr); break;
+                        // Special
+                        case 'gamma':       r = w.sym_gamma(expr); break;
+                        case 'zeta':        r = w.sym_zeta(expr); break;
+                        case 'erf':         r = w.sym_erf(expr); break;
+                        case 'lambertw':    r = w.sym_lambertw(expr); break;
+                        // Number theory
+                        case 'factorial':   r = w.factorial(parseInt(expr)); break;
+                        case 'fibonacci':   r = w.fibonacci(parseInt(expr)); break;
+                        case 'gcd':         r = w.gcd(expr, v2); break;
+                        case 'lcm':         r = w.lcm(expr, v2); break;
+                        case 'nextprime':   r = w.nextprime(expr); break;
+                        case 'binomial':    r = w.binomial(expr, parseInt(v2)); break;
+                        // Algebraic
+                        case 'numer_denom': r = w.numer_denom(expr); break;
+                        case 'coeff':       r = w.coeff(expr, v, parseInt(v2)); break;
+                        // Output formats
+                        case 'latex':       r = w.to_latex(expr); break;
+                        case 'mathml':      r = w.to_mathml(expr); break;
+                        case 'ccode':       r = w.to_ccode(expr); break;
+                        case 'jscode':      r = w.to_jscode(expr); break;
+                        // Matrix
+                        case 'matrix_det':
+                            r = w.matrix_det(parseInt(v), parseInt(v2), expr); break;
+                        case 'matrix_inv':
+                            r = w.matrix_inv(parseInt(v), parseInt(v2), expr); break;
+                        case 'matrix_transpose':
+                            r = w.matrix_transpose(parseInt(v), parseInt(v2), expr); break;
+                        default:
+                            r = 'Unknown operation: ' + op;
                     }
+                    out.textContent = r;
                 } catch (e) {
                     out.textContent = 'Error: ' + e;
                 }
             });
-        }
-        main();
+        });
     </script>
 </body>
 </html>

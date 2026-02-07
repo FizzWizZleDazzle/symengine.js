@@ -37,17 +37,35 @@ set(CMAKE_RANLIB       "${WASI_SDK_PREFIX}/bin/llvm-ranlib" CACHE FILEPATH "ranl
 set(WASI_SYSROOT "${WASI_SDK_PREFIX}/share/wasi-sysroot")
 
 # ---- Compiler / linker flags -------------------------------------------
-set(_WASM_TARGET_FLAGS
-    "--target=wasm32-unknown-unknown"
+# We compile with --target=wasm32-wasi so the compiler finds libc/libc++
+# headers from the sysroot.  Since we only produce a static library (.a),
+# no WASI imports are resolved here — they are irrelevant.  The final
+# link happens inside the Rust project (targeting wasm32-unknown-unknown),
+# which provides WASI stubs and a compatible allocator.
+#
+# -fno-exceptions is added via CMAKE_CXX_FLAGS_<CONFIG> rather than
+# CMAKE_CXX_FLAGS_INIT so that SymEngine's try_compile() C++11 check
+# (which contains `throw`) can pass during configuration.
+set(_WASM_BASE_FLAGS
+    "--target=wasm32-wasi"
     "--sysroot=${WASI_SYSROOT}"
-    "-fno-exceptions"
-    "-fno-rtti"
     "-fvisibility=hidden"
 )
-string(REPLACE ";" " " _WASM_FLAGS_STR "${_WASM_TARGET_FLAGS}")
+string(REPLACE ";" " " _WASM_BASE_STR "${_WASM_BASE_FLAGS}")
 
-set(CMAKE_C_FLAGS_INIT   "${_WASM_FLAGS_STR}")
-set(CMAKE_CXX_FLAGS_INIT "${_WASM_FLAGS_STR}")
+set(CMAKE_C_FLAGS_INIT   "${_WASM_BASE_STR}")
+set(CMAKE_CXX_FLAGS_INIT "${_WASM_BASE_STR}")
+
+# Apply -fno-exceptions -fno-rtti to actual build configurations only
+set(_WASM_EXTRA "-fno-exceptions -fno-rtti")
+set(CMAKE_C_FLAGS_RELEASE_INIT          "-O2 ${_WASM_EXTRA}")
+set(CMAKE_C_FLAGS_MINSIZEREL_INIT       "-Os ${_WASM_EXTRA}")
+set(CMAKE_C_FLAGS_RELWITHDEBINFO_INIT   "-O2 -g ${_WASM_EXTRA}")
+set(CMAKE_C_FLAGS_DEBUG_INIT            "-g ${_WASM_EXTRA}")
+set(CMAKE_CXX_FLAGS_RELEASE_INIT        "-O2 ${_WASM_EXTRA}")
+set(CMAKE_CXX_FLAGS_MINSIZEREL_INIT     "-Os ${_WASM_EXTRA}")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT "-O2 -g ${_WASM_EXTRA}")
+set(CMAKE_CXX_FLAGS_DEBUG_INIT          "-g ${_WASM_EXTRA}")
 
 # We can only produce static libraries — no executable linking possible
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)

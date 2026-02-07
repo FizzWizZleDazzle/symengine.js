@@ -13,12 +13,35 @@ fn main() {
     };
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
+
+    // Link order matters: symengine first, then C++ runtime, then C runtime
     println!("cargo:rustc-link-lib=static=symengine");
 
     // If built with GMP, also link libgmp
-    let gmp_lib = lib_dir.join("libgmp.a");
-    if gmp_lib.exists() {
+    if lib_dir.join("libgmp.a").exists() {
         println!("cargo:rustc-link-lib=static=gmp");
+    }
+
+    // C++ standard library (from wasi-sdk, shipped alongside libsymengine.a)
+    if lib_dir.join("libc++.a").exists() {
+        println!("cargo:rustc-link-lib=static=c++");
+        println!("cargo:rustc-link-lib=static=c++abi");
+    }
+
+    // wasi-libc (provides malloc, free, printf, string ops, math, etc.)
+    if lib_dir.join("libc.a").exists() {
+        println!("cargo:rustc-link-lib=static=c");
+    }
+
+    // Compile WASI stubs and allocator bridge so the binary runs in
+    // wasm32-unknown-unknown without a WASI runtime.
+    let stubs = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("wasi_stub.c");
+    if stubs.exists() {
+        cc::Build::new()
+            .file(&stubs)
+            .target("wasm32-unknown-unknown")
+            .opt_level(2)
+            .compile("wasi_stub");
     }
 
     // Re-run if the library changes
@@ -27,4 +50,5 @@ fn main() {
         "cargo:rerun-if-changed={}",
         lib_dir.join("libsymengine.a").display()
     );
+    println!("cargo:rerun-if-changed=wasi_stub.c");
 }
