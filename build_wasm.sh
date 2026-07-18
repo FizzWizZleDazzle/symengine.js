@@ -308,6 +308,7 @@ build_symengine_lib_unknown() {
         "-DCMAKE_BUILD_TYPE=$BUILD_TYPE"
         "-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX/wasm-unknown"
         "-DINTEGER_CLASS=$INTEGER_CLASS"
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
     )
 
     if [[ "$INTEGER_CLASS" == "boostmp" ]]; then
